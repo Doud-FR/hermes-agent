@@ -6904,6 +6904,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     return await self._handle_goal_command(event)
                 return "Agent is running — use /goal status / pause / clear mid-run, or /stop before setting a new goal."
 
+            if _cmd_def_inner and _cmd_def_inner.name == "moa":
+                return "Agent is running — wait or /stop first, then run /moa."
+
             # /subgoal is safe mid-run — it only modifies the goal's
             # subgoals list, which the judge reads at the next turn
             # boundary. No race with the running turn.
@@ -7376,6 +7379,23 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
 
         if canonical == "goal":
             return await self._handle_goal_command(event)
+
+        if canonical == "moa":
+            from hermes_cli.moa_config import build_moa_turn_prompt, moa_usage
+            from hermes_cli.config import load_config
+
+            moa_payload = event.get_command_args().strip()
+            if not moa_payload:
+                return moa_usage()
+            try:
+                cfg = load_config()
+                moa_cfg = cfg.get("moa") if isinstance(cfg, dict) else None
+            except Exception:
+                moa_cfg = None
+            try:
+                event.text = build_moa_turn_prompt(moa_payload, moa_cfg)
+            except Exception:
+                return "Failed to prepare MoA turn."
 
         if canonical == "subgoal":
             return await self._handle_subgoal_command(event)

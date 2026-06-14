@@ -7,11 +7,13 @@ import {
   getAuxiliaryModels,
   getGlobalModelInfo,
   getGlobalModelOptions,
+  getMoaModels,
   getRecommendedDefaultModel,
+  saveMoaModels,
   setEnvVar,
   setModelAssignment
 } from '@/hermes'
-import type { AuxiliaryModelsResponse, ModelOptionProvider, StaleAuxAssignment } from '@/hermes'
+import type { AuxiliaryModelsResponse, MoaConfigResponse, MoaModelSlot, ModelOptionProvider, StaleAuxAssignment } from '@/hermes'
 import { useI18n } from '@/i18n'
 import { AlertTriangle, Cpu, Loader2 } from '@/lib/icons'
 import { cn } from '@/lib/utils'
@@ -97,6 +99,7 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
   const [selectedProvider, setSelectedProvider] = useState('')
   const [selectedModel, setSelectedModel] = useState('')
   const [auxiliary, setAuxiliary] = useState<AuxiliaryModelsResponse | null>(null)
+  const [moa, setMoa] = useState<MoaConfigResponse | null>(null)
   const [applying, setApplying] = useState(false)
   const [editingAuxTask, setEditingAuxTask] = useState<null | string>(null)
   const [auxDraft, setAuxDraft] = useState<{ model: string; provider: string }>({ model: '', provider: '' })
@@ -113,10 +116,11 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
     setError('')
 
     try {
-      const [modelInfo, modelOptions, auxiliaryModels] = await Promise.all([
+      const [modelInfo, modelOptions, auxiliaryModels, moaModels] = await Promise.all([
         getGlobalModelInfo(),
         getGlobalModelOptions(),
-        getAuxiliaryModels()
+        getAuxiliaryModels(),
+        getMoaModels().catch(() => null)
       ])
 
       setMainModel({ model: modelInfo.model, provider: modelInfo.provider })
@@ -124,6 +128,7 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
       setSelectedProvider(prev => prev || modelInfo.provider)
       setSelectedModel(prev => prev || modelInfo.model)
       setAuxiliary(auxiliaryModels)
+      setMoa(moaModels)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -159,6 +164,35 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
     () => providers.find(provider => provider.slug === auxDraft.provider)?.models ?? [],
     [auxDraft.provider, providers]
   )
+
+  const modelsForProvider = useCallback(
+    (provider: string) => providers.find(row => row.slug === provider)?.models ?? [],
+    [providers]
+  )
+
+  const updateMoaSlot = useCallback((slot: MoaModelSlot, patch: Partial<MoaModelSlot>): MoaModelSlot => {
+    const next = { ...slot, ...patch }
+
+    if (patch.provider) {
+      next.model = ''
+    }
+
+    return next
+  }, [])
+
+  const saveMoa = useCallback(async (next: MoaConfigResponse) => {
+    setApplying(true)
+    setError('')
+
+    try {
+      const saved = await saveMoaModels(next)
+      setMoa(saved)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setApplying(false)
+    }
+  }, [])
 
   const auxiliaryTaskLabel = useCallback((key: string) => m.tasks[key]?.label ?? key, [m.tasks])
 
@@ -567,6 +601,62 @@ export function ModelSettings({ onMainModelChanged }: ModelSettingsProps) {
           })}
         </div>
       </section>
+      {moa && (
+        <section>
+          <div className="mb-2.5 flex items-center justify-between">
+            <SectionHeading icon={Cpu} title="Mixture of Agents" />
+            <Button disabled={applying} onClick={() => void saveMoa(moa)} size="sm" variant="textStrong">
+              {applying ? m.applying : t.common.save}
+            </Button>
+          </div>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Configure the provider/model slots used by /moa.
+          </p>
+          <div className="grid gap-1">
+            {moa.reference_models.map((slot, index) => (
+              <ListRow
+                below={
+                  <div className="mt-2 flex flex-wrap items-center gap-2 pt-1">
+                    <Select onValueChange={value => setMoa(prev => prev && ({ ...prev, reference_models: prev.reference_models.map((s, i) => i === index ? updateMoaSlot(s, { provider: value }) : s) }))} value={slot.provider}>
+                      <SelectTrigger className={cn('min-w-32', CONTROL_TEXT)}><SelectValue placeholder={m.provider} /></SelectTrigger>
+                      <SelectContent>{providerOptions.map(provider => <SelectItem key={provider.slug || 'none'} value={provider.slug || 'none'}>{provider.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select onValueChange={value => setMoa(prev => prev && ({ ...prev, reference_models: prev.reference_models.map((s, i) => i === index ? updateMoaSlot(s, { model: value }) : s) }))} value={slot.model}>
+                      <SelectTrigger className={cn('min-w-48', CONTROL_TEXT)}><SelectValue placeholder={m.model} /></SelectTrigger>
+                      <SelectContent>{modelsForProvider(slot.provider).map(model => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Button disabled={moa.reference_models.length <= 1 || applying} onClick={() => setMoa(prev => prev && ({ ...prev, reference_models: prev.reference_models.filter((_, i) => i !== index) }))} size="sm" variant="ghost">
+                      Remove
+                    </Button>
+                  </div>
+                }
+                description={<span className="font-mono text-[0.68rem]">{slot.provider} · {slot.model}</span>}
+                key={`${slot.provider}-${slot.model}-${index}`}
+                title={`Reference ${index + 1}`}
+              />
+            ))}
+            <Button disabled={applying} onClick={() => setMoa(prev => prev && ({ ...prev, reference_models: [...prev.reference_models, prev.aggregator] }))} size="sm" variant="textStrong">
+              Add reference model
+            </Button>
+            <ListRow
+              below={
+                <div className="mt-2 flex flex-wrap items-center gap-2 pt-1">
+                  <Select onValueChange={value => setMoa(prev => prev && ({ ...prev, aggregator: updateMoaSlot(prev.aggregator, { provider: value }) }))} value={moa.aggregator.provider}>
+                    <SelectTrigger className={cn('min-w-32', CONTROL_TEXT)}><SelectValue placeholder={m.provider} /></SelectTrigger>
+                    <SelectContent>{providerOptions.map(provider => <SelectItem key={provider.slug || 'none'} value={provider.slug || 'none'}>{provider.name}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Select onValueChange={value => setMoa(prev => prev && ({ ...prev, aggregator: updateMoaSlot(prev.aggregator, { model: value }) }))} value={moa.aggregator.model}>
+                    <SelectTrigger className={cn('min-w-48', CONTROL_TEXT)}><SelectValue placeholder={m.model} /></SelectTrigger>
+                    <SelectContent>{modelsForProvider(moa.aggregator.provider).map(model => <SelectItem key={model} value={model}>{model}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              }
+              description={<span className="font-mono text-[0.68rem]">{moa.aggregator.provider} · {moa.aggregator.model}</span>}
+              title="Aggregator"
+            />
+          </div>
+        </section>
+      )}
     </div>
   )
 }

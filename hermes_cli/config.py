@@ -1383,6 +1383,22 @@ DEFAULT_CONFIG = {
             "timeout": 60,
             "extra_body": {},
         },
+        "moa_reference": {
+            "provider": "auto",
+            "model": "",
+            "base_url": "",
+            "api_key": "",
+            "timeout": 600,
+            "extra_body": {},
+        },
+        "moa_aggregator": {
+            "provider": "auto",
+            "model": "",
+            "base_url": "",
+            "api_key": "",
+            "timeout": 600,
+            "extra_body": {},
+        },
     },
     
     "display": {
@@ -1803,6 +1819,21 @@ DEFAULT_CONFIG = {
         # negatives (goal actually done but judge says continue) and
         # unbounded model spend on fuzzy / unachievable goals.
         "max_turns": 20,
+    },
+
+    # Mixture of Agents — /moa <prompt> runs the normal Hermes agent loop,
+    # but injects guidance synthesized from these provider/model slots before
+    # each main-model iteration.
+    "moa": {
+        "reference_models": [
+            {"provider": "openai-codex", "model": "gpt-5.5"},
+            {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro"},
+        ],
+        "aggregator": {"provider": "openrouter", "model": "anthropic/claude-opus-4.8"},
+        "reference_temperature": 0.6,
+        "aggregator_temperature": 0.4,
+        "max_tokens": 4096,
+        "enabled": True,
     },
 
     # Skills — external skill directories for sharing skills across tools/agents.
@@ -2573,7 +2604,7 @@ OPTIONAL_ENV_VARS = {
         "prompt": "OpenRouter API key",
         "url": "https://openrouter.ai/keys",
         "password": True,
-        "tools": ["vision_analyze", "mixture_of_agents"],
+        "tools": ["vision_analyze"],
         "category": "provider",
         "advanced": True,
     },
@@ -4113,7 +4144,7 @@ _KNOWN_ROOT_KEYS = {
     "_config_version", "model", "providers", "fallback_model",
     "fallback_providers", "credential_pool_strategies", "toolsets",
     "agent", "terminal", "display", "compression", "delegation",
-    "auxiliary", "custom_providers", "context", "memory", "gateway",
+    "auxiliary", "moa", "custom_providers", "context", "memory", "gateway",
     "sessions", "streaming", "updates",
 }
 

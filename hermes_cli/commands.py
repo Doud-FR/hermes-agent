@@ -107,6 +107,8 @@ COMMAND_REGISTRY: list[CommandDef] = [
                args_hint="<prompt>"),
     CommandDef("goal", "Set a standing goal Hermes works on across turns until achieved", "Session",
                args_hint="[text | pause | resume | clear | status]"),
+    CommandDef("moa", "Run one prompt through configured Mixture of Agents models", "Session",
+               args_hint="<prompt>"),
     CommandDef("subgoal", "Add or manage extra criteria on the active goal", "Session",
                args_hint="[text | remove N | clear]"),
     CommandDef("status", "Show session info", "Session"),
@@ -1053,7 +1055,9 @@ _SLACK_PRIORITY_ALIASES = ("btw", "bg")
 # the telegram-parity test reads it so an entry here is a deliberate
 # "Slack-via-/hermes" decision, not a silent clamp.
 #   - credits: the billing/top-up surface; reached via /hermes credits on Slack.
-_SLACK_VIA_HERMES_ONLY = frozenset({"credits"})
+#   - moa: high-cost slash mode, available through /hermes moa to avoid
+#     displacing existing native Slack slash commands at the 50-command cap.
+_SLACK_VIA_HERMES_ONLY = frozenset({"credits", "moa"})
 
 
 def _sanitize_slack_name(raw: str) -> str:

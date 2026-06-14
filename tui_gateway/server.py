@@ -7869,6 +7869,7 @@ _PENDING_INPUT_COMMANDS: frozenset[str] = frozenset(
         "steer",
         "plan",
         "goal",
+        "moa",
         "undo",
     }
 )
@@ -8131,6 +8132,24 @@ def _(rid, params: dict) -> dict:
         if not arg:
             return _err(rid, 4004, "usage: /queue <prompt>")
         return _ok(rid, {"type": "send", "message": arg})
+
+    if name == "moa":
+        if not arg:
+            return _err(rid, 4004, "usage: /moa <prompt>")
+        try:
+            from hermes_cli.moa_config import build_moa_turn_prompt
+
+            moa_cfg = _load_cfg().get("moa") or {}
+            return _ok(
+                rid,
+                {
+                    "type": "send",
+                    "notice": "MoA mode queued for this turn.",
+                    "message": build_moa_turn_prompt(arg, moa_cfg),
+                },
+            )
+        except Exception as exc:
+            return _err(rid, 5030, f"moa unavailable: {exc}")
 
     if name == "retry":
         if not session:

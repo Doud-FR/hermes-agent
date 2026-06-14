@@ -639,6 +639,20 @@ export interface AuxiliaryModelsResponse {
   tasks: AuxiliaryTaskAssignment[]
 }
 
+export interface MoaModelSlot {
+  provider: string
+  model: string
+}
+
+export interface MoaConfigResponse {
+  aggregator: MoaModelSlot
+  aggregator_temperature: number
+  enabled: boolean
+  max_tokens: number
+  reference_models: MoaModelSlot[]
+  reference_temperature: number
+}
+
 export interface ModelAssignmentRequest {
   /** Optional API key for a custom/local endpoint. Persisted to model.api_key
    *  (where the runtime reads it) for self-hosted endpoints that require auth.
