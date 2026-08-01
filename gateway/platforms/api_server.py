@@ -2966,7 +2966,10 @@ class APIServerAdapter(OpenAICompatRoutesMixin, BasePlatformAdapter):
         await asyncio.to_thread(db.end_session, source_id, "branched")
         await asyncio.to_thread(
             db.create_session, fork_id, "api_server", model=source.get("model"),
-            system_prompt=source.get("system_prompt"), parent_session_id=source_id)
+            system_prompt=source.get("system_prompt"),
+            model_config={"_branched_from": source_id},
+            parent_session_id=source_id,
+        )
         messages = await asyncio.to_thread(db.get_messages, source_id)
         await asyncio.to_thread(db.replace_messages, fork_id, messages)
         title = body.get("title")
