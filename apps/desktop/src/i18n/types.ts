@@ -1946,6 +1946,18 @@ export interface Translations {
     recommended: string
     advanced: (count: number) => string
     noTokenNeeded: string
+    emailContent: string
+    richHtmlEmail: string
+    richHtmlEmailHelp: string
+    emailSignature: string
+    emailSignatureHelp: string
+    emailSignatureText: string
+    emailSignatureTextHelp: string
+    emailSignatureTextPlaceholder: string
+    emailSignatureTextRequired: string
+    emailSignatureHtml: string
+    emailSignatureHtmlHelp: string
+    emailSignatureHtmlPlaceholder: string
     enabled: string
     disabled: string
     unsavedChanges: string
