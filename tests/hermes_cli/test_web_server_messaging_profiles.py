@@ -63,11 +63,26 @@ def _telegram(payload):
     return next(p for p in payload["platforms"] if p["id"] == "telegram")
 
 
+def _email(payload):
+    return next(p for p in payload["platforms"] if p["id"] == "email")
+
+
 def _env_field(platform, key):
     return next(f for f in platform["env_vars"] if f["key"] == key)
 
 
 class TestProfileScopedMessagingReads:
+    def test_email_content_config_defaults_are_typed(self, client, isolated_profiles):
+        resp = client.get(
+            "/api/messaging/platforms", params={"profile": "worker_alpha"}
+        )
+
+        assert resp.status_code == 200
+        assert _email(resp.json())["config"] == {
+            "rich_html_enabled": False,
+            "signature": {"enabled": False, "text": "", "html": ""},
+        }
+
     def test_scoped_read_does_not_show_root_credentials(
         self, client, isolated_profiles
     ):
@@ -137,6 +152,97 @@ class TestProfileScopedMessagingReads:
 
 
 class TestProfileScopedMessagingWrites:
+    def test_email_content_config_round_trips_without_clobbering_siblings(
+        self, client, isolated_profiles
+    ):
+        worker_home = isolated_profiles["worker_alpha"]
+        (worker_home / "config.yaml").write_text(
+            yaml.safe_dump(
+                {
+                    "platforms": {
+                        "email": {"enabled": True, "poll_interval": 42},
+                        "telegram": {"enabled": False},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        email_config = {
+            "rich_html_enabled": True,
+            "signature": {
+                "enabled": True,
+                "text": "  Generic assistant\nSupport  ",
+                "html": "<strong>Generic assistant</strong>",
+            },
+        }
+        resp = client.put(
+            "/api/messaging/platforms/email",
+            params={"profile": "worker_alpha"},
+            json={"config": email_config},
+        )
+
+        assert resp.status_code == 200
+        worker_cfg = yaml.safe_load((worker_home / "config.yaml").read_text())
+        assert worker_cfg["platforms"]["email"] == {
+            "enabled": True,
+            "poll_interval": 42,
+            **email_config,
+        }
+        assert worker_cfg["platforms"]["telegram"] == {"enabled": False}
+        root_cfg = yaml.safe_load(
+            (isolated_profiles["default"] / "config.yaml").read_text()
+        ) or {}
+        assert "email" not in (root_cfg.get("platforms") or {})
+
+        read = client.get(
+            "/api/messaging/platforms", params={"profile": "worker_alpha"}
+        )
+        assert read.status_code == 200
+        assert _email(read.json())["config"] == email_config
+
+    def test_email_signature_requires_plain_text_fallback(
+        self, client, isolated_profiles
+    ):
+        resp = client.put(
+            "/api/messaging/platforms/email",
+            params={"profile": "worker_alpha"},
+            json={
+                "config": {
+                    "rich_html_enabled": True,
+                    "signature": {
+                        "enabled": True,
+                        "text": "   ",
+                        "html": "<strong>HTML only</strong>",
+                    },
+                }
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "signature.text" in resp.json()["detail"]
+        worker_cfg = yaml.safe_load(
+            (isolated_profiles["worker_alpha"] / "config.yaml").read_text()
+        ) or {}
+        assert "email" not in (worker_cfg.get("platforms") or {})
+
+    def test_email_content_config_is_rejected_for_other_platforms(
+        self, client, isolated_profiles
+    ):
+        resp = client.put(
+            "/api/messaging/platforms/telegram",
+            params={"profile": "worker_alpha"},
+            json={
+                "config": {
+                    "rich_html_enabled": True,
+                    "signature": {"enabled": False, "text": "", "html": ""},
+                }
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "Email" in resp.json()["detail"]
+
     def test_scoped_write_lands_in_target_profile_env(
         self, client, isolated_profiles
     ):
@@ -267,4 +373,3 @@ class TestMultiplexPortBindingGuard:
                 json={"clear_env": [api_server["env_vars"][0]["key"]]},
             )
             assert resp.status_code == 200
-

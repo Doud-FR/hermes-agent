@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, SecretStr, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 
 
 class ConfigUpdate(BaseModel):
@@ -44,10 +44,24 @@ class CustomEndpointUpdate(BaseModel):
     make_default: bool = False
     models: Optional[List[str]] = None
 
+class MessagingEmailSignatureConfig(BaseModel):
+    enabled: bool = False
+    text: str = ""
+    html: str = ""
+
+
+class MessagingEmailConfig(BaseModel):
+    rich_html_enabled: bool = False
+    signature: MessagingEmailSignatureConfig = Field(
+        default_factory=MessagingEmailSignatureConfig
+    )
+
+
 class MessagingPlatformUpdate(BaseModel):
     enabled: Optional[bool] = None
     env: Dict[str, str] = {}
     clear_env: List[str] = []
+    config: Optional[MessagingEmailConfig] = None
     # Explicit body profile beats the switcher's query param (same as other scoped writes).
     profile: Optional[str] = None
 
@@ -504,4 +518,3 @@ class _PluginProvidersPutBody(BaseModel):
 
 class _PluginVisibilityBody(BaseModel):
     hidden: bool
-

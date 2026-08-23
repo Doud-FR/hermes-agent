@@ -233,7 +233,19 @@ export interface MessagingHomeChannel {
   thread_id?: string
 }
 
+export interface MessagingEmailSignatureConfig {
+  enabled: boolean
+  html: string
+  text: string
+}
+
+export interface MessagingEmailConfig {
+  rich_html_enabled: boolean
+  signature: MessagingEmailSignatureConfig
+}
+
 export interface MessagingPlatformInfo {
+  config?: MessagingEmailConfig
   configured: boolean
   description: string
   docs_url: string
@@ -270,6 +282,7 @@ export interface PairingResponse {
 
 export interface MessagingPlatformUpdate {
   clear_env?: string[]
+  config?: MessagingEmailConfig
   enabled?: boolean
   env?: Record<string, string>
 }

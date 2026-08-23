@@ -64,6 +64,19 @@ function platform(patch: Partial<MessagingPlatformInfo> = {}): MessagingPlatform
   }
 }
 
+function emailPlatform(patch: Partial<MessagingPlatformInfo> = {}): MessagingPlatformInfo {
+  return platform({
+    configured: true,
+    config: {
+      rich_html_enabled: false,
+      signature: { enabled: false, html: '', text: '' }
+    },
+    id: 'email',
+    name: 'Email',
+    ...patch
+  })
+}
+
 beforeEach(() => {
   updateMessagingPlatform.mockResolvedValue({ ok: true, platform: 'teams' })
   getPairing.mockResolvedValue({ approved: [], pending: [] })
@@ -128,6 +141,90 @@ describe('MessagingView setup-guide link', () => {
     })
 
     await waitFor(() => expect(openExternalLink).toHaveBeenCalledWith(docsUrl))
+  })
+})
+
+describe('MessagingView email content settings', () => {
+  it('reads the typed email config and renders both signature fields', async () => {
+    getMessagingPlatforms.mockResolvedValue({
+      platforms: [
+        emailPlatform({
+          config: {
+            rich_html_enabled: true,
+            signature: {
+              enabled: true,
+              html: '<strong>Advanced signature</strong>',
+              text: 'Plain signature'
+            }
+          }
+        })
+      ]
+    })
+
+    await renderMessaging()
+
+    expect((await screen.findByRole('switch', { name: 'Rich HTML email' })).getAttribute('data-state')).toBe('checked')
+    expect(screen.getByRole('switch', { name: 'Signature' }).getAttribute('data-state')).toBe('checked')
+    expect((screen.getByLabelText('Signature text') as HTMLTextAreaElement).value).toBe('Plain signature')
+    expect((screen.getByLabelText('Advanced signature HTML') as HTMLTextAreaElement).value).toBe(
+      '<strong>Advanced signature</strong>'
+    )
+  })
+
+  it('writes a typed config update without trimming signature content', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    updateMessagingPlatform.mockResolvedValue({ ok: true, platform: 'email' })
+
+    await renderMessaging()
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Rich HTML email' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Signature' }))
+    fireEvent.change(screen.getByLabelText('Signature text'), {
+      target: { value: '  Generic assistant\nSupport  ' }
+    })
+    fireEvent.change(screen.getByLabelText('Advanced signature HTML'), {
+      target: { value: '<strong>Generic assistant</strong>' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    await waitFor(() =>
+      expect(updateMessagingPlatform).toHaveBeenCalledWith(
+        'email',
+        {
+          config: {
+            rich_html_enabled: true,
+            signature: {
+              enabled: true,
+              html: '<strong>Generic assistant</strong>',
+              text: '  Generic assistant\nSupport  '
+            }
+          }
+        },
+        undefined
+      )
+    )
+  })
+
+  it('requires the canonical plain-text fallback before saving', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+
+    await renderMessaging()
+
+    fireEvent.click(await screen.findByRole('switch', { name: 'Signature' }))
+
+    expect(screen.getByText('Signature text is required when the signature is enabled.')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Save changes' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(updateMessagingPlatform).not.toHaveBeenCalled()
+  })
+
+  it('keeps the existing page compatible with a backend that omits email config', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform({ config: undefined })] })
+
+    await renderMessaging()
+
+    expect((await screen.findAllByText('Email')).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('switch', { name: 'Rich HTML email' })).toBeNull()
+    expect(screen.queryByRole('switch', { name: 'Signature' })).toBeNull()
   })
 })
 

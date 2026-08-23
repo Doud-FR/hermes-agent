@@ -75,6 +75,8 @@ export type {
   MemoryProviderConfig,
   MemoryProviderOAuthStatus,
   MemoryStatusResponse,
+  MessagingEmailConfig,
+  MessagingEmailSignatureConfig,
   MessagingEnvVarInfo,
   MessagingHomeChannel,
   MessagingPlatformInfo,
