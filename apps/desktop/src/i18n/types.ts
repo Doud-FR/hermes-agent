@@ -2402,6 +2402,40 @@ export interface Translations {
     projectLoadFailed: string
     noSessions: string
     noFilterMatches: string
+    filterMenu: {
+      ariaLabel: string
+      grouping: string
+      ordering: string
+      show: string
+      inboxStyle: string
+      filters: string
+      pullRequest: string
+      archived: string
+      resetToDefaults: string
+      expandAll: string
+      collapseAll: string
+      options: {
+        updated: string
+        project: string
+        status: string
+        profile: string
+        created: string
+        tokens: string
+        cost: string
+        manual: string
+        preview: string
+        pullRequestShort: string
+        open: string
+        draft: string
+        merged: string
+        closed: string
+        noPullRequest: string
+        needsInput: string
+        working: string
+        unread: string
+        idle: string
+      }
+    }
     projects: {
       showAllSessions: string
       sectionLabel: string
