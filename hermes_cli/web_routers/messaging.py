@@ -29,7 +29,7 @@ from hermes_cli.web_server_gateway import _restart_gateway_after
 from hermes_cli.web_server_messaging import (
     _TelegramOnboardingPairing, _WhatsAppOnboardingSession, _messaging_platform_catalog, _telegram_onboarding_error_message, _telegram_onboarding_lock, _telegram_onboarding_pairings, _whatsapp_onboarding_payload, _whatsapp_onboarding_sessions,
 )
-from hermes_cli.web_routers._common import http_failure
+from hermes_cli.web_routers._common import _CONFIG_MUTATION_LOCK, http_failure
 from hermes_cli.web_models import (
     MessagingPlatformUpdate, TelegramOnboardingApply, TelegramOnboardingStart,
     WhatsAppOnboardingApply, WhatsAppOnboardingStart,
@@ -48,6 +48,7 @@ _whatsapp_session_path = late("_whatsapp_session_path", "hermes_cli.web_server_m
 _write_platform_enabled = late("_write_platform_enabled", "hermes_cli.web_server_messaging")
 load_env = late("load_env", "hermes_cli.config")
 load_config = late("load_config", "hermes_cli.config")
+save_config = late("save_config", "hermes_cli.config")
 read_runtime_status = late("read_runtime_status", "gateway.status")
 remove_env_value = late("remove_env_value", "hermes_cli.config")
 save_env_value = late("save_env_value", "hermes_cli.config")
@@ -189,6 +190,52 @@ def _platform_enablement(
     return enabled, configured, home_channel
 
 
+def _messaging_email_config_payload() -> dict[str, Any]:
+    """Return the typed, non-secret Email content settings for the active scope."""
+    from utils import is_truthy_value
+
+    cfg = load_config()
+    platforms_cfg = cfg.get("platforms")
+    email_cfg = platforms_cfg.get("email") if isinstance(platforms_cfg, dict) else None
+    if not isinstance(email_cfg, dict):
+        email_cfg = {}
+
+    raw_signature = email_cfg.get("signature")
+    signature = raw_signature if isinstance(raw_signature, dict) else {}
+    text = signature.get("text")
+    html = signature.get("html")
+    return {
+        "rich_html_enabled": is_truthy_value(email_cfg.get("rich_html_enabled"), default=False),
+        "signature": {
+            "enabled": is_truthy_value(signature.get("enabled"), default=False),
+            "text": text if isinstance(text, str) else "",
+            "html": html if isinstance(html, str) else "",
+        },
+    }
+
+
+def _write_messaging_email_config(email_config: Any) -> None:
+    """Persist only the Desktop-managed Email content keys in one RMW cycle."""
+    with _CONFIG_MUTATION_LOCK:
+        cfg = load_config()
+        platforms_cfg = cfg.get("platforms")
+        if not isinstance(platforms_cfg, dict):
+            platforms_cfg = {}
+            cfg["platforms"] = platforms_cfg
+        email_cfg = platforms_cfg.get("email")
+        if not isinstance(email_cfg, dict):
+            email_cfg = {}
+            platforms_cfg["email"] = email_cfg
+
+        email_cfg["rich_html_enabled"] = email_config.rich_html_enabled
+        email_cfg["signature"] = {
+            "enabled": email_config.signature.enabled,
+            "text": email_config.signature.text,
+            "html": email_config.signature.html,
+        }
+        save_config(cfg)
+
+
 def _messaging_platform_payload(
     entry: dict[str, Any], env_on_disk: dict[str, str], runtime: dict | None,
     scoped: bool = False, profile_home: Optional[Path] = None,
@@ -256,6 +303,14 @@ def _messaging_platform_payload(
             "allowed_users_set": bool(env_value("WHATSAPP_ALLOWED_USERS").strip()),
             "home_channel_set": bool(home_channel),
         }
+    if platform_id == "email":
+        try:
+            payload["config"] = _messaging_email_config_payload()
+        except Exception:
+            payload["config"] = {
+                "rich_html_enabled": False,
+                "signature": {"enabled": False, "text": "", "html": ""},
+            }
     return payload
 
 
@@ -824,6 +879,20 @@ async def update_messaging_platform(platform_id: str, body: MessagingPlatformUpd
     entry = _require_platform(platform_id)
 
     target_profile = body.profile or profile
+    if body.config is not None and platform_id != "email":
+        raise HTTPException(
+            status_code=400,
+            detail="Email content config is only valid for the Email platform",
+        )
+    if (
+        body.config is not None
+        and body.config.signature.enabled
+        and not body.config.signature.text.strip()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="email signature.text is required when signature.enabled is true",
+        )
     if body.enabled:
         conflict = _multiplex_port_binding_conflict(platform_id, target_profile)
         if conflict:
@@ -857,14 +926,18 @@ async def update_messaging_platform(platform_id: str, body: MessagingPlatformUpd
             if body.enabled is not None:
                 _write_platform_enabled(platform_id, body.enabled)
 
+            if body.config is not None:
+                _write_messaging_email_config(body.config)
+
     with http_failure(f"PUT /api/messaging/platforms/{platform_id} failed", 500, detail="Internal server error"):
         await asyncio.to_thread(_apply)
 
         # Audit trail for channel config mutations: names only, never values.
         _log.info(
             "Messaging platform updated: platform=%s profile=%s enabled=%s "
-            "env_keys=%s cleared_keys=%s",
-            platform_id, target_profile or "current", body.enabled, sorted(body.env), sorted(body.clear_env),
+            "env_keys=%s cleared_keys=%s config_updated=%s",
+            platform_id, target_profile or "current", body.enabled, sorted(body.env),
+            sorted(body.clear_env), body.config is not None,
         )
         return {"ok": True, "platform": platform_id}
 

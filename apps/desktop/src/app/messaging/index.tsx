@@ -10,13 +10,16 @@ import { DisclosureCaret } from '@/components/ui/disclosure-caret'
 import { ErrorBanner } from '@/components/ui/error-state'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import {
   approvePairing,
   getMessagingPlatforms,
   getPairing,
+  type MessagingEmailConfig,
   type MessagingEnvVarInfo,
   type MessagingPlatformInfo,
+  type MessagingPlatformUpdate,
   type PairingUser,
   revokePairing,
   updateMessagingPlatform
@@ -47,6 +50,7 @@ interface MessagingViewProps extends React.ComponentProps<'section'> {
 }
 
 type EditMap = Record<string, Record<string, string>>
+type EmailConfigEditMap = Record<string, MessagingEmailConfig>
 
 const PILL_TONE: Record<StatusTone, string> = {
   good: 'bg-primary/10 text-primary',
@@ -80,6 +84,12 @@ const trimEdits = (edits: Record<string, string>): Record<string, string> =>
       .map(([k, v]) => [k, v.trim()])
       .filter(([, v]) => v)
   )
+
+const emailConfigsEqual = (left: MessagingEmailConfig, right: MessagingEmailConfig) =>
+  left.rich_html_enabled === right.rich_html_enabled &&
+  left.signature.enabled === right.signature.enabled &&
+  left.signature.text === right.signature.text &&
+  left.signature.html === right.signature.html
 
 /** Stable row identity: a user id is only unique within its platform. */
 const pairingKey = (user: PairingUser) => `${user.platform}:${user.user_id}`
@@ -143,6 +153,7 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
   const [approving, setApproving] = useState<null | string>(null)
   const [pendingRevoke, setPendingRevoke] = useState<null | PairingUser>(null)
   const [edits, setEdits] = useState<EditMap>({})
+  const [emailConfigEdits, setEmailConfigEdits] = useState<EmailConfigEditMap>({})
   const [query, setQuery] = useState('')
   const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState<string | null>(null)
@@ -213,6 +224,7 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
     setPlatforms(null)
     setPairing({ approved: [], pending: [] })
     setEdits({})
+    setEmailConfigEdits({})
   }, [scopeProfile])
 
   const changeEventsAvailable = useStore($changeEventsAvailable)
@@ -272,6 +284,19 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
     return platforms.find(platform => platform.id === selectedId) || platforms[0] || null
   }, [platforms, selectedId])
 
+  const selectedEmailConfig = selected?.id === 'email' ? (emailConfigEdits[selected.id] ?? selected.config) : undefined
+
+  const selectedEmailConfigDirty = Boolean(
+    selected?.id === 'email' &&
+    selected.config &&
+    selectedEmailConfig &&
+    !emailConfigsEqual(selectedEmailConfig, selected.config)
+  )
+
+  const selectedEmailConfigInvalid = Boolean(
+    selectedEmailConfig?.signature.enabled && !selectedEmailConfig.signature.text.trim()
+  )
+
   const pendingByPlatform = useMemo(() => byPlatform(pairing.pending), [pairing.pending])
   const approvedByPlatform = useMemo(() => byPlatform(pairing.approved), [pairing.approved])
 
@@ -325,21 +350,43 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
 
   async function handleSave(platform: MessagingPlatformInfo) {
     const env = trimEdits(edits[platform.id] || {})
+    const config = emailConfigEdits[platform.id]
 
-    if (Object.keys(env).length === 0) {
+    if (Object.keys(env).length === 0 && !config) {
+      return
+    }
+
+    if (config?.signature.enabled && !config.signature.text.trim()) {
       return
     }
 
     setSaving(`env:${platform.id}`)
 
     try {
-      await updateMessagingPlatform(platform.id, { env }, scopeProfile)
+      const update: MessagingPlatformUpdate = {}
+
+      if (Object.keys(env).length > 0) {
+        update.env = env
+      }
+
+      if (config) {
+        update.config = config
+      }
+
+      await updateMessagingPlatform(platform.id, update, scopeProfile)
       setEdits(current => ({ ...current, [platform.id]: {} }))
+      setEmailConfigEdits(current => {
+        const next = { ...current }
+
+        delete next[platform.id]
+
+        return next
+      })
       await refreshPlatforms()
       notify({
         kind: 'success',
         title: m.setupSaved(platform.name),
-        message: m.restartToReconnect,
+        message: config ? m.restartToApply : m.restartToReconnect,
         action: restartGatewayAction
       })
     } catch (err) {
@@ -458,10 +505,11 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
                 actionBar={
                   selected && (
                     <PlatformActionBar
-                      hasEdits={Object.keys(trimEdits(edits[selected.id] || {})).length > 0}
+                      hasEdits={Object.keys(trimEdits(edits[selected.id] || {})).length > 0 || selectedEmailConfigDirty}
                       onSave={() => void handleSave(selected)}
                       onToggle={enabled => void handleToggle(selected, enabled)}
                       platform={selected}
+                      saveBlocked={selectedEmailConfigInvalid}
                       saving={saving}
                     />
                   )
@@ -472,6 +520,7 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
                     approved={approvedByPlatform[selected.id] ?? []}
                     approving={approving}
                     edits={edits[selected.id] || {}}
+                    emailConfig={selectedEmailConfig}
                     onApprove={user => void handleApprove(user)}
                     onClear={key => void handleClear(selected, key)}
                     onEdit={(key, value) =>
@@ -482,6 +531,19 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
                           [key]: value
                         }
                       }))
+                    }
+                    onEmailConfigChange={config =>
+                      setEmailConfigEdits(current => {
+                        if (selected.config && emailConfigsEqual(config, selected.config)) {
+                          const next = { ...current }
+
+                          delete next[selected.id]
+
+                          return next
+                        }
+
+                        return { ...current, [selected.id]: config }
+                      })
                     }
                     onRevoke={setPendingRevoke}
                     pending={pendingByPlatform[selected.id] ?? []}
@@ -560,9 +622,11 @@ function PlatformDetail({
   approved,
   approving,
   edits,
+  emailConfig,
   onApprove,
   onClear,
   onEdit,
+  onEmailConfigChange,
   onRevoke,
   pending,
   platform,
@@ -571,9 +635,11 @@ function PlatformDetail({
   approved: PairingUser[]
   approving: null | string
   edits: Record<string, string>
+  emailConfig?: MessagingEmailConfig
   onApprove: (user: PairingUser) => void
   onClear: (key: string) => void
   onEdit: (key: string, value: string) => void
+  onEmailConfigChange: (config: MessagingEmailConfig) => void
   onRevoke: (user: PairingUser) => void
   pending: PairingUser[]
   platform: MessagingPlatformInfo
@@ -701,6 +767,14 @@ function PlatformDetail({
         )}
       </section>
 
+      {emailConfig && (
+        <EmailContentSettings
+          config={emailConfig}
+          onChange={onEmailConfigChange}
+          saving={saving === `env:${platform.id}`}
+        />
+      )}
+
       <section>
         <SectionTitle>{m.required}</SectionTitle>
         <div className="mt-3 grid gap-1">
@@ -776,12 +850,14 @@ function PlatformActionBar({
   onSave,
   onToggle,
   platform,
+  saveBlocked,
   saving
 }: {
   hasEdits: boolean
   onSave: () => void
   onToggle: (enabled: boolean) => void
   platform: MessagingPlatformInfo
+  saveBlocked: boolean
   saving: string | null
 }) {
   const { t } = useI18n()
@@ -800,12 +876,107 @@ function PlatformActionBar({
 
       <div className="ml-auto flex items-center gap-2">
         {hasEdits && <span className="text-xs text-muted-foreground">{m.unsavedChanges}</span>}
-        <Button disabled={!hasEdits || isSavingEnv} onClick={onSave} size="sm">
+        <Button disabled={!hasEdits || isSavingEnv || saveBlocked} onClick={onSave} size="sm">
           <Save />
           {isSavingEnv ? m.saving : m.saveChanges}
         </Button>
       </div>
     </>
+  )
+}
+
+function EmailContentSettings({
+  config,
+  onChange,
+  saving
+}: {
+  config: MessagingEmailConfig
+  onChange: (config: MessagingEmailConfig) => void
+  saving: boolean
+}) {
+  const { t } = useI18n()
+  const m = t.messaging
+  const textId = 'messaging-email-signature-text'
+  const htmlId = 'messaging-email-signature-html'
+  const errorId = 'messaging-email-signature-text-error'
+  const textInvalid = config.signature.enabled && !config.signature.text.trim()
+
+  const updateSignature = (patch: Partial<MessagingEmailConfig['signature']>) =>
+    onChange({ ...config, signature: { ...config.signature, ...patch } })
+
+  return (
+    <section>
+      <SectionTitle>{m.emailContent}</SectionTitle>
+      <div className="mt-1 grid gap-1">
+        <ListRow
+          action={
+            <Switch
+              aria-label={m.richHtmlEmail}
+              checked={config.rich_html_enabled}
+              disabled={saving}
+              onCheckedChange={rich_html_enabled => onChange({ ...config, rich_html_enabled })}
+              size="xs"
+            />
+          }
+          description={m.richHtmlEmailHelp}
+          title={m.richHtmlEmail}
+        />
+        <ListRow
+          action={
+            <Switch
+              aria-label={m.emailSignature}
+              checked={config.signature.enabled}
+              disabled={saving}
+              onCheckedChange={enabled => updateSignature({ enabled })}
+              size="xs"
+            />
+          }
+          description={m.emailSignatureHelp}
+          title={m.emailSignature}
+        />
+        <ListRow
+          below={
+            <>
+              <Textarea
+                aria-describedby={textInvalid ? errorId : undefined}
+                aria-invalid={textInvalid}
+                className="mt-3 w-full resize-y"
+                disabled={saving}
+                id={textId}
+                onChange={event => updateSignature({ text: event.target.value })}
+                placeholder={m.emailSignatureTextPlaceholder}
+                rows={4}
+                value={config.signature.text}
+              />
+              {textInvalid && (
+                <p className="mt-1.5 text-xs text-destructive" id={errorId} role="alert">
+                  {m.emailSignatureTextRequired}
+                </p>
+              )}
+            </>
+          }
+          description={m.emailSignatureTextHelp}
+          title={<label htmlFor={textId}>{m.emailSignatureText}</label>}
+          wide
+        />
+        <ListRow
+          below={
+            <Textarea
+              className="mt-3 min-h-28 w-full resize-y font-mono"
+              disabled={saving}
+              id={htmlId}
+              onChange={event => updateSignature({ html: event.target.value })}
+              placeholder={m.emailSignatureHtmlPlaceholder}
+              rows={6}
+              value={config.signature.html}
+            />
+          }
+          description={m.emailSignatureHtmlHelp}
+          title={<label htmlFor={htmlId}>{m.emailSignatureHtml}</label>}
+          wide
+        />
+      </div>
+    </section>
   )
 }
 
