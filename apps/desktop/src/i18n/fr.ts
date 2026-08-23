@@ -460,7 +460,8 @@ export const fr: Translations = {
       duplicateUrl: label => `Une connexion à cette URL de gateway existe déjà (« ${label} »).`,
       duplicateSsh: label => `Une connexion à cet hôte SSH existe déjà (« ${label} »).`,
       sameBackendHint: label => `Même backend que « ${label} »`,
-      localAddHint: "La connexion locale est indisponible : la connexion gérée existe déjà (il ne peut y en avoir qu'une).",
+      localAddHint:
+        "La connexion locale est indisponible : la connexion gérée existe déjà (il ne peut y en avoir qu'une).",
       cloudAddHint:
         "Astuce : connectez-vous à Hermes Cloud ci-dessus pour découvrir automatiquement vos agents — utilisez ce formulaire uniquement pour enregistrer manuellement l'URL d'une instance connue.",
       save: 'Enregistrer la connexion',
@@ -614,7 +615,8 @@ export const fr: Translations = {
       uiScaleDesc: (percent: number) =>
         `Redimensionne le texte et les contrôles dans toute l'application. Cmd/Ctrl avec +, - et 0 fonctionne aussi. Actuel : ${percent}%.`,
       sessionDensityTitle: 'Densité de la liste des sessions',
-      sessionDensityDesc: 'Choisissez la quantité de contexte affichée sous les titres de session dans la barre latérale.',
+      sessionDensityDesc:
+        'Choisissez la quantité de contexte affichée sous les titres de session dans la barre latérale.',
       sessionDensityCompact: 'Compacte',
       sessionDensityComfortable: 'Confortable',
       sessionDensityDetailed: 'Détaillée',
@@ -1256,8 +1258,7 @@ export const fr: Translations = {
       saveServer: 'Enregistrer le serveur',
       test: 'Tester la connexion',
       testing: 'Test en cours...',
-      testOk: count =>
-        `Connecté — ${count} outil${count === 1 ? '' : 's'} disponible${count === 1 ? '' : 's'}`,
+      testOk: count => `Connecté — ${count} outil${count === 1 ? '' : 's'} disponible${count === 1 ? '' : 's'}`,
       testFailed: 'Échec de la connexion',
       enableServer: name => `Activer ${name}`,
       disableServer: name => `Désactiver ${name}`,
@@ -1308,7 +1309,7 @@ export const fr: Translations = {
       deepLinkErrorTitle: "Lien d'installation MCP rejeté",
       deepLinkErrorName: 'Le nom du serveur est absent ou invalide dans le lien.',
       deepLinkErrorConfig: "La configuration du lien n'est pas un JSON valide encodé en base64.",
-      deepLinkErrorShape: "La configuration doit être un objet JSON comportant un champ chaîne `url` ou `command`.",
+      deepLinkErrorShape: 'La configuration doit être un objet JSON comportant un champ chaîne `url` ou `command`.',
       deepLinkErrorUrl: 'Seules les URL de serveur http:// et https:// sont autorisées.',
       deepLinkErrorTooLarge: 'La configuration dépasse la limite de 32 Ko.',
       importButton: 'Importer',
@@ -1538,8 +1539,7 @@ export const fr: Translations = {
     enableAll: 'Tout activer',
     disableAll: 'Tout désactiver',
     disableUnused: 'Désactiver les inutilisés',
-    bulkUpdated: count =>
-      `${count} ${count === 1 ? 'élément' : 'éléments'} mis à jour pour les nouvelles sessions.`,
+    bulkUpdated: count => `${count} ${count === 1 ? 'élément' : 'éléments'} mis à jour pour les nouvelles sessions.`,
     bulkNoChange: 'Rien à changer.',
     usageCount: count => `utilisé ${count}×`,
     provenance: {
@@ -2929,12 +2929,12 @@ export const fr: Translations = {
     technicalDetails: 'Détails techniques',
     clientAlsoBehindTitle: "L'application Desktop n'est pas à jour",
     clientAlsoBehindMessage:
-      "Le backend est à jour, mais cette application Desktop utilise encore une ancienne version. Mettez-la à jour pour profiter des derniers correctifs.",
+      'Le backend est à jour, mais cette application Desktop utilise encore une ancienne version. Mettez-la à jour pour profiter des derniers correctifs.',
     clientAlsoBehindAction: "Mettre à jour l'application Desktop",
     everythingDispatched: 'Mise à jour envoyée',
     everythingSkipped: 'Ignorée',
     everythingRowFailed: 'Échec de la mise à jour',
-    everythingFanoutFailedTitle: "Impossible de mettre à jour les autres instances",
+    everythingFanoutFailedTitle: 'Impossible de mettre à jour les autres instances',
     applyStatus: {
       preparing: 'Mise à jour du backend…',
       pulling: 'Mise à jour du backend…',
@@ -3455,8 +3455,8 @@ export const fr: Translations = {
 
   contextMenu: {
     link: {
-      openInApp: "Ouvrir dans le navigateur intégré",
-      openExternal: "Ouvrir dans le navigateur externe",
+      openInApp: 'Ouvrir dans le navigateur intégré',
+      openExternal: 'Ouvrir dans le navigateur externe',
       copyUrl: "Copier l'URL",
       copyResolvedUrl: "Copier l'URL résolue"
     },

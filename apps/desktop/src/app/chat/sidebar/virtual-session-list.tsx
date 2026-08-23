@@ -136,7 +136,12 @@ export const VirtualSessionList: FC<VirtualSessionListProps> = ({
       const open = !collapsedDateGroupKeys?.has(row.key)
 
       return (
-        <div data-index={virtualItem.index} key={row.rowKey ?? row.key} ref={virtualizer.measureElement} style={itemStyle}>
+        <div
+          data-index={virtualItem.index}
+          key={row.rowKey ?? row.key}
+          ref={virtualizer.measureElement}
+          style={itemStyle}
+        >
           <SidebarDateDivider
             action={dividerAction}
             label={label}

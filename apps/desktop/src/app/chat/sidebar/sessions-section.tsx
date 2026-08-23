@@ -535,14 +535,13 @@ export function SidebarSessionsSection({
       />
     )
 
-    inner =
-      sessionsDraggable ? (
-        <ReorderableList ids={sortableRowIds} onReorder={reorderVisibleSessions} sensors={dndSensors}>
-          {virtual}
-        </ReorderableList>
-      ) : (
-        virtual
-      )
+    inner = sessionsDraggable ? (
+      <ReorderableList ids={sortableRowIds} onReorder={reorderVisibleSessions} sensors={dndSensors}>
+        {virtual}
+      </ReorderableList>
+    ) : (
+      virtual
+    )
   } else if (sessionsDraggable) {
     inner = (
       <ReorderableList ids={sortableRowIds} onReorder={reorderVisibleSessions} sensors={dndSensors}>

@@ -175,8 +175,8 @@ describe('reorderableRowIds', () => {
 
 describe('mergeVisibleReorderIds', () => {
   it('reorders visible rows without dropping or moving collapsed rows', () => {
-    expect(mergeVisibleReorderIds(['hidden-a', 'visible-a', 'visible-b', 'hidden-b'], ['visible-b', 'visible-a'])).toEqual(
-      ['hidden-a', 'visible-b', 'visible-a', 'hidden-b']
-    )
+    expect(
+      mergeVisibleReorderIds(['hidden-a', 'visible-a', 'visible-b', 'hidden-b'], ['visible-b', 'visible-a'])
+    ).toEqual(['hidden-a', 'visible-b', 'visible-a', 'hidden-b'])
   })
 })
