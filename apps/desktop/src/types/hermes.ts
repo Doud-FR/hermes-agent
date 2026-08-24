@@ -236,12 +236,44 @@ export interface MessagingHomeChannel {
 export interface MessagingEmailSignatureConfig {
   enabled: boolean
   html: string
+  logo_width: number
   text: string
 }
 
 export interface MessagingEmailConfig {
   rich_html_enabled: boolean
   signature: MessagingEmailSignatureConfig
+}
+
+export interface MessagingEmailSignatureLogoStatus {
+  configured: boolean
+  valid: boolean
+  mime_type: null | string
+  format: null | string
+  size_bytes: null | number
+  width: null | number
+  height: null | number
+  modified_at: null | string
+}
+
+export interface MessagingEmailPreviewRequest {
+  body_markdown: string
+  config: MessagingEmailConfig
+}
+
+export interface MessagingEmailPreviewResource {
+  content_id: string
+  mime_type: 'image/gif' | 'image/jpeg' | 'image/png' | 'image/webp'
+  data_base64: string
+  size_bytes: number
+  width: number
+  height: number
+}
+
+export interface MessagingEmailPreviewResponse {
+  plain_text: string
+  html: null | string
+  resources: MessagingEmailPreviewResource[]
 }
 
 export interface MessagingPlatformInfo {

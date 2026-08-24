@@ -14,24 +14,31 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tip } from '@/components/ui/tooltip'
 import {
   approvePairing,
+  deleteEmailSignatureLogo,
+  getEmailSignatureLogoStatus,
   getMessagingPlatforms,
   getPairing,
   type MessagingEmailConfig,
+  type MessagingEmailPreviewResponse,
+  type MessagingEmailSignatureLogoStatus,
   type MessagingEnvVarInfo,
   type MessagingPlatformInfo,
   type MessagingPlatformUpdate,
   type PairingUser,
+  previewEmail,
   revokePairing,
-  updateMessagingPlatform
+  updateMessagingPlatform,
+  uploadEmailSignatureLogo
 } from '@/hermes'
 import { type Translations, useI18n } from '@/i18n'
+import { emailPreviewDocument } from '@/lib/email-preview'
 import { openExternalLink } from '@/lib/external-link'
-import { ExternalLink, Save, Trash2 } from '@/lib/icons'
+import { ExternalLink, FileImage, Save, Trash2, Upload } from '@/lib/icons'
 import { normalize } from '@/lib/text'
 import { cn } from '@/lib/utils'
 import { $changeEventsAvailable, $pairingChangeTick, $platformsChangeTick } from '@/store/live-sync'
 import { notify, notifyError } from '@/store/notifications'
-import { $settingsRequestProfile } from '@/store/settings-scope'
+import { $settingsRequestProfile, $settingsScopeProfile } from '@/store/settings-scope'
 import { runGatewayRestart } from '@/store/system-actions'
 
 import { useRefreshHotkey } from '../hooks/use-refresh-hotkey'
@@ -89,7 +96,56 @@ const emailConfigsEqual = (left: MessagingEmailConfig, right: MessagingEmailConf
   left.rich_html_enabled === right.rich_html_enabled &&
   left.signature.enabled === right.signature.enabled &&
   left.signature.text === right.signature.text &&
-  left.signature.html === right.signature.html
+  left.signature.html === right.signature.html &&
+  left.signature.logo_width === right.signature.logo_width
+
+const EMAIL_SIGNATURE_LOGO_MAX_BYTES = 2 * 1024 * 1024
+const EMAIL_SIGNATURE_LOGO_MIME_TYPES = new Set(['image/gif', 'image/jpeg', 'image/png', 'image/webp'])
+
+function emailSignatureLogoEndpointMissing(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+
+  return (
+    message.includes('The endpoint is likely missing on the Hermes backend.') ||
+    /^404:\s*(?:\{\s*"detail"\s*:\s*"Not Found"\s*\}|Not Found)\s*$/i.test(message)
+  )
+}
+
+function emailSignatureLogoError(error: unknown, m: Translations['messaging']): string {
+  const message = error instanceof Error ? error.message : String(error)
+
+  if (/^413\b/.test(message)) {
+    return m.emailSignatureLogoTooLarge
+  }
+
+  if (/^422\b/.test(message)) {
+    return m.emailSignatureLogoBackendInvalid
+  }
+
+  if (/^404\b/.test(message)) {
+    return m.emailSignatureLogoProfileNotFound
+  }
+
+  if (message.includes('File uploads are not supported against OAuth-gated remote backends yet.')) {
+    return m.emailSignatureLogoRemoteUploadUnsupported
+  }
+
+  return m.emailSignatureLogoFailed
+}
+
+function readableFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+
+  const kibibytes = bytes / 1024
+
+  if (kibibytes < 1024) {
+    return `${Number(kibibytes.toFixed(1))} KiB`
+  }
+
+  return `${Number((kibibytes / 1024).toFixed(1))} MiB`
+}
 
 /** Stable row identity: a user id is only unique within its platform. */
 const pairingKey = (user: PairingUser) => `${user.platform}:${user.user_id}`
@@ -141,6 +197,7 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
   // Shared settings "Applies to" scope, request-shaped (undefined → follow
   // the active profile; the API helpers treat null as "target primary").
   const scopeProfile = useStore($settingsRequestProfile)
+  const scopeKey = useStore($settingsScopeProfile)
   // Both save/toggle toasts offer the same one-click restart.
   const restartGatewayAction = { label: t.commandCenter.restartGateway, onClick: () => void runGatewayRestart() }
   const [platforms, setPlatforms] = useState<MessagingPlatformInfo[] | null>(null)
@@ -548,6 +605,8 @@ export function MessagingView({ setStatusbarItemGroup: _setStatusbarItemGroup, .
                     onRevoke={setPendingRevoke}
                     pending={pendingByPlatform[selected.id] ?? []}
                     platform={selected}
+                    profile={scopeProfile}
+                    profileKey={scopeKey}
                     saving={saving}
                   />
                 )}
@@ -630,6 +689,8 @@ function PlatformDetail({
   onRevoke,
   pending,
   platform,
+  profile,
+  profileKey,
   saving
 }: {
   approved: PairingUser[]
@@ -643,6 +704,8 @@ function PlatformDetail({
   onRevoke: (user: PairingUser) => void
   pending: PairingUser[]
   platform: MessagingPlatformInfo
+  profile?: string
+  profileKey: string
   saving: string | null
 }) {
   const { t } = useI18n()
@@ -771,6 +834,8 @@ function PlatformDetail({
         <EmailContentSettings
           config={emailConfig}
           onChange={onEmailConfigChange}
+          profile={profile}
+          profileKey={profileKey}
           saving={saving === `env:${platform.id}`}
         />
       )}
@@ -888,10 +953,14 @@ function PlatformActionBar({
 function EmailContentSettings({
   config,
   onChange,
+  profile,
+  profileKey,
   saving
 }: {
   config: MessagingEmailConfig
   onChange: (config: MessagingEmailConfig) => void
+  profile?: string
+  profileKey: string
   saving: boolean
 }) {
   const { t } = useI18n()
@@ -975,8 +1044,341 @@ function EmailContentSettings({
           title={<label htmlFor={htmlId}>{m.emailSignatureHtml}</label>}
           wide
         />
+        <EmailSignatureLogoSettings key={profileKey} profile={profile} />
+        <EmailPreviewSettings config={config} key={profileKey} profile={profile} />
       </div>
     </section>
+  )
+}
+
+function EmailPreviewSettings({ config, profile }: { config: MessagingEmailConfig; profile?: string }) {
+  const { t } = useI18n()
+  const m = t.messaging
+  const requestIdRef = useRef(0)
+  const [bodyMarkdown, setBodyMarkdown] = useState(m.emailPreviewBodyDefault)
+  const [preview, setPreview] = useState<MessagingEmailPreviewResponse | null>(null)
+  const [document, setDocument] = useState<string | null>(null)
+  const [supported, setSupported] = useState(true)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  // eslint-disable-next-line no-restricted-syntax -- generation invalidates stale async preview responses
+  useEffect(() => {
+    requestIdRef.current += 1
+    setPreview(null)
+    setDocument(null)
+    setError(null)
+
+    return () => {
+      requestIdRef.current += 1
+    }
+  }, [
+    bodyMarkdown,
+    config.rich_html_enabled,
+    config.signature.enabled,
+    config.signature.html,
+    config.signature.logo_width,
+    config.signature.text
+  ])
+
+  async function generatePreview() {
+    const requestId = ++requestIdRef.current
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      const next = await previewEmail({ body_markdown: bodyMarkdown, config }, profile)
+      const nextDocument = emailPreviewDocument(next)
+
+      if (requestId === requestIdRef.current) {
+        setPreview(next)
+        setDocument(nextDocument)
+        setSupported(true)
+      }
+    } catch (err) {
+      if (requestId !== requestIdRef.current) {
+        return
+      }
+
+      if (emailSignatureLogoEndpointMissing(err)) {
+        setSupported(false)
+      } else {
+        setSupported(true)
+        setError(m.emailPreviewFailed)
+      }
+    } finally {
+      if (requestId === requestIdRef.current) {
+        setLoading(false)
+      }
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-(--ui-stroke-tertiary) px-3 py-3">
+      <h5 className="text-sm font-medium">{m.emailPreview}</h5>
+      <p className="mt-1 text-xs leading-relaxed text-(--ui-text-tertiary)">{m.emailPreviewHelp}</p>
+      <label className="mt-3 block text-xs font-medium" htmlFor="messaging-email-preview-body">
+        {m.emailPreviewBody}
+      </label>
+      <p className="mt-1 text-xs text-(--ui-text-tertiary)">{m.emailPreviewBodyHelp}</p>
+      <Textarea
+        className="mt-2 w-full resize-y"
+        id="messaging-email-preview-body"
+        onChange={event => setBodyMarkdown(event.target.value)}
+        rows={4}
+        value={bodyMarkdown}
+      />
+      <div className="mt-3 flex items-center gap-2">
+        <Button disabled={loading || !supported} onClick={() => void generatePreview()} size="sm" variant="secondary">
+          {loading ? m.emailPreviewGenerating : m.emailPreviewGenerate}
+        </Button>
+      </div>
+
+      {!supported && <p className="mt-2 text-xs text-(--ui-text-tertiary)">{m.emailPreviewUnsupported}</p>}
+      {error && (
+        <p className="mt-2 text-xs text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+
+      {document && preview && (
+        <div className="mt-3 grid gap-3">
+          <iframe
+            className="h-72 w-full rounded-md border border-(--ui-stroke-tertiary) bg-white"
+            referrerPolicy="no-referrer"
+            sandbox=""
+            srcDoc={document}
+            title={m.emailPreviewFrameTitle}
+          />
+          <div>
+            <p className="text-xs font-medium">{m.emailPreviewPlainFallback}</p>
+            <pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap rounded-md bg-muted p-2 text-xs">
+              {preview.plain_text}
+            </pre>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EmailSignatureLogoSettings({ profile }: { profile?: string }) {
+  const { t } = useI18n()
+  const m = t.messaging
+  const inputRef = useRef<HTMLInputElement>(null)
+  const requestIdRef = useRef(0)
+  const [status, setStatus] = useState<MessagingEmailSignatureLogoStatus | null>(null)
+  const [supported, setSupported] = useState<boolean | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [pendingRemoval, setPendingRemoval] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
+
+  const refreshStatus = useCallback(
+    async (quiet = false) => {
+      const requestId = ++requestIdRef.current
+
+      if (!quiet) {
+        setLoading(true)
+        setError(null)
+        setSuccess(null)
+      }
+
+      try {
+        const next = await getEmailSignatureLogoStatus(profile)
+
+        if (requestId === requestIdRef.current) {
+          setStatus(next)
+          setSupported(true)
+        }
+      } catch (err) {
+        if (requestId !== requestIdRef.current) {
+          return
+        }
+
+        if (emailSignatureLogoEndpointMissing(err)) {
+          setStatus(null)
+          setSupported(false)
+          setError(null)
+        } else {
+          setSupported(true)
+          setError(emailSignatureLogoError(err, m))
+        }
+      } finally {
+        if (requestId === requestIdRef.current) {
+          setLoading(false)
+        }
+      }
+    },
+    [m, profile]
+  )
+
+  // eslint-disable-next-line no-restricted-syntax -- request generation invalidates stale async status reads on unmount
+  useEffect(() => {
+    void refreshStatus()
+
+    return () => {
+      requestIdRef.current += 1
+    }
+  }, [refreshStatus])
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+
+    event.target.value = ''
+
+    if (!file) {
+      return
+    }
+
+    setError(null)
+    setSuccess(null)
+
+    if (file.size > EMAIL_SIGNATURE_LOGO_MAX_BYTES) {
+      setError(m.emailSignatureLogoTooLarge)
+
+      return
+    }
+
+    if (file.type && !EMAIL_SIGNATURE_LOGO_MIME_TYPES.has(file.type.toLowerCase())) {
+      setError(m.emailSignatureLogoInvalidType)
+
+      return
+    }
+
+    const operationProfile = profile
+    setUploading(true)
+
+    try {
+      const next = await uploadEmailSignatureLogo(file, operationProfile)
+
+      setStatus(next)
+      setSupported(true)
+      setSuccess(m.emailSignatureLogoUploaded)
+      await refreshStatus(true)
+    } catch (err) {
+      setError(emailSignatureLogoError(err, m))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleRemove() {
+    const operationProfile = profile
+    setError(null)
+    setSuccess(null)
+
+    try {
+      const next = await deleteEmailSignatureLogo(operationProfile)
+
+      setStatus(next)
+      setSupported(true)
+      setSuccess(m.emailSignatureLogoRemoved)
+      await refreshStatus(true)
+    } catch (err) {
+      setError(emailSignatureLogoError(err, m))
+
+      throw new Error(emailSignatureLogoError(err, m))
+    }
+  }
+
+  const configured = Boolean(status?.configured)
+
+  const metadata = configured
+    ? [
+        status?.format,
+        typeof status?.width === 'number' && typeof status?.height === 'number'
+          ? `${status.width} × ${status.height}`
+          : null,
+        typeof status?.size_bytes === 'number' ? readableFileSize(status.size_bytes) : null
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : null
+
+  return (
+    <div className="rounded-md border border-(--ui-stroke-tertiary) px-3 py-3">
+      <div className="flex items-start gap-3">
+        <FileImage className="mt-0.5 size-4 shrink-0 text-(--ui-text-tertiary)" />
+        <div className="min-w-0 flex-1">
+          <h5 className="text-sm font-medium">{m.emailSignatureLogo}</h5>
+          <p className="mt-1 text-xs leading-relaxed text-(--ui-text-tertiary)">{m.emailSignatureLogoHelp}</p>
+          <p className="mt-1 text-xs leading-relaxed text-(--ui-text-tertiary)">{m.emailSignatureLogoFormats}</p>
+
+          {loading && <p className="mt-3 text-xs text-(--ui-text-tertiary)">{m.emailSignatureLogoLoading}</p>}
+
+          {!loading && supported === false && (
+            <p className="mt-3 text-xs text-(--ui-text-tertiary)">{m.emailSignatureLogoUnsupported}</p>
+          )}
+
+          {!loading && supported !== false && (
+            <>
+              <div className="mt-3">
+                <p className="text-xs font-medium">
+                  {configured
+                    ? status?.valid
+                      ? m.emailSignatureLogoConfigured
+                      : m.emailSignatureLogoInvalidStored
+                    : m.emailSignatureLogoNone}
+                </p>
+                {metadata && <p className="mt-1 text-xs text-(--ui-text-tertiary)">{metadata}</p>}
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <input
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  aria-label={m.emailSignatureLogoFile}
+                  className="sr-only"
+                  onChange={event => void handleFileChange(event)}
+                  ref={inputRef}
+                  type="file"
+                />
+                <Button disabled={uploading} onClick={() => inputRef.current?.click()} size="sm" variant="secondary">
+                  <Upload className="size-3.5" />
+                  {uploading
+                    ? m.emailSignatureLogoUploading
+                    : configured
+                      ? m.emailSignatureLogoReplace
+                      : m.emailSignatureLogoChoose}
+                </Button>
+                {configured && (
+                  <Button disabled={uploading} onClick={() => setPendingRemoval(true)} size="sm" variant="ghost">
+                    <Trash2 className="size-3.5" />
+                    {m.emailSignatureLogoRemove}
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
+
+          {success && (
+            <p className="mt-2 text-xs text-primary" role="status">
+              {success}
+            </p>
+          )}
+          {error && (
+            <p className="mt-2 text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <ConfirmDialog
+        busyLabel={m.emailSignatureLogoRemoving}
+        cancelLabel={t.common.cancel}
+        confirmLabel={m.emailSignatureLogoRemove}
+        description={m.emailSignatureLogoRemoveDescription}
+        destructive
+        doneLabel={m.emailSignatureLogoRemoved}
+        onClose={() => setPendingRemoval(false)}
+        onConfirm={handleRemove}
+        open={pendingRemoval}
+        title={m.emailSignatureLogoRemoveTitle}
+      />
+    </div>
   )
 }
 

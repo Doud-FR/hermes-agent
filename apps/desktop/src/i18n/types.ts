@@ -1593,6 +1593,41 @@ export interface Translations {
     emailSignatureHtml: string
     emailSignatureHtmlHelp: string
     emailSignatureHtmlPlaceholder: string
+    emailSignatureLogo: string
+    emailSignatureLogoHelp: string
+    emailSignatureLogoFormats: string
+    emailSignatureLogoLoading: string
+    emailSignatureLogoNone: string
+    emailSignatureLogoConfigured: string
+    emailSignatureLogoInvalidStored: string
+    emailSignatureLogoFile: string
+    emailSignatureLogoChoose: string
+    emailSignatureLogoReplace: string
+    emailSignatureLogoUploading: string
+    emailSignatureLogoUploaded: string
+    emailSignatureLogoRemove: string
+    emailSignatureLogoRemoving: string
+    emailSignatureLogoRemoved: string
+    emailSignatureLogoRemoveTitle: string
+    emailSignatureLogoRemoveDescription: string
+    emailSignatureLogoUnsupported: string
+    emailSignatureLogoTooLarge: string
+    emailSignatureLogoInvalidType: string
+    emailSignatureLogoBackendInvalid: string
+    emailSignatureLogoProfileNotFound: string
+    emailSignatureLogoRemoteUploadUnsupported: string
+    emailSignatureLogoFailed: string
+    emailPreview: string
+    emailPreviewHelp: string
+    emailPreviewBody: string
+    emailPreviewBodyHelp: string
+    emailPreviewBodyDefault: string
+    emailPreviewGenerate: string
+    emailPreviewGenerating: string
+    emailPreviewUnsupported: string
+    emailPreviewFailed: string
+    emailPreviewFrameTitle: string
+    emailPreviewPlainFallback: string
     enabled: string
     disabled: string
     unsavedChanges: string
