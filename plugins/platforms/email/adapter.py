@@ -350,7 +350,14 @@ class EmailAdapter(BasePlatformAdapter):
         # Rich HTML stays opt-in so existing installations retain their exact
         # plain-text MIME envelope until explicitly enabled in config.yaml.
         self._rich_html_enabled = is_truthy_value(extra.get("rich_html_enabled"), default=False)
-        self._signature = _signature_from_extra(extra)
+        try:
+            self._signature = _signature_from_extra(extra)
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "Invalid Email signature configuration; signature disabled: %s",
+                exc,
+            )
+            self._signature = None
 
         # Require an authenticated From: domain (SPF/DKIM/DMARC) before trusting it for authorization
         # (GHSA-rxqh-5572-8m77). Default ON; opt out via require_authenticated_sender: false / EMAIL_TRUST_FROM_HEADER=true.
