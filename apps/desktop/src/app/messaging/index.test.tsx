@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { MessagingPlatformInfo } from '@/types/hermes'
 
 const getMessagingPlatforms = vi.fn()
+const getEmailSignatureLogoStatus = vi.fn()
+const uploadEmailSignatureLogo = vi.fn()
+const deleteEmailSignatureLogo = vi.fn()
+const previewEmail = vi.fn()
 const updateMessagingPlatform = vi.fn()
 const getPairing = vi.fn()
 const approvePairing = vi.fn()
@@ -15,12 +19,16 @@ const openExternalLink = vi.fn()
 vi.mock('@/hermes', () => ({
   approvePairing: (platformId: string, requestId: string, profile?: null | string) =>
     approvePairing(platformId, requestId, profile),
+  deleteEmailSignatureLogo: (profile?: null | string) => deleteEmailSignatureLogo(profile),
+  getEmailSignatureLogoStatus: (profile?: null | string) => getEmailSignatureLogoStatus(profile),
   getMessagingPlatforms: (profile?: null | string) => getMessagingPlatforms(profile),
   getPairing: (profile?: null | string) => getPairing(profile),
   getProfiles: vi.fn(async () => ({ profiles: [] })),
   revokePairing: (platformId: string, userId: string, profile?: null | string) =>
     revokePairing(platformId, userId, profile),
+  previewEmail: (body: unknown, profile?: null | string) => previewEmail(body, profile),
   setApiRequestProfile: vi.fn(),
+  uploadEmailSignatureLogo: (file: File, profile?: null | string) => uploadEmailSignatureLogo(file, profile),
   updateMessagingPlatform: (id: string, body: unknown, profile?: null | string) =>
     updateMessagingPlatform(id, body, profile)
 }))
@@ -69,7 +77,7 @@ function emailPlatform(patch: Partial<MessagingPlatformInfo> = {}): MessagingPla
     configured: true,
     config: {
       rich_html_enabled: false,
-      signature: { enabled: false, html: '', text: '' }
+      signature: { enabled: false, html: '', logo_width: 230, text: '' }
     },
     id: 'email',
     name: 'Email',
@@ -77,9 +85,39 @@ function emailPlatform(patch: Partial<MessagingPlatformInfo> = {}): MessagingPla
   })
 }
 
+const noLogo = {
+  configured: false,
+  format: null,
+  height: null,
+  mime_type: null,
+  modified_at: null,
+  size_bytes: null,
+  valid: false,
+  width: null
+}
+
+const pngLogo = {
+  configured: true,
+  format: 'PNG',
+  height: 64,
+  mime_type: 'image/png',
+  modified_at: '2026-08-24T10:00:00Z',
+  size_bytes: 1536,
+  valid: true,
+  width: 128
+}
+
 beforeEach(() => {
   updateMessagingPlatform.mockResolvedValue({ ok: true, platform: 'teams' })
   getPairing.mockResolvedValue({ approved: [], pending: [] })
+  getEmailSignatureLogoStatus.mockResolvedValue(noLogo)
+  uploadEmailSignatureLogo.mockResolvedValue(pngLogo)
+  deleteEmailSignatureLogo.mockResolvedValue(noLogo)
+  previewEmail.mockResolvedValue({
+    plain_text: 'Hello there.',
+    html: '<p>Hello there.</p>',
+    resources: []
+  })
 })
 
 afterEach(() => {
@@ -154,6 +192,7 @@ describe('MessagingView email content settings', () => {
             signature: {
               enabled: true,
               html: '<strong>Advanced signature</strong>',
+              logo_width: 230,
               text: 'Plain signature'
             }
           }
@@ -196,6 +235,7 @@ describe('MessagingView email content settings', () => {
             signature: {
               enabled: true,
               html: '<strong>Generic assistant</strong>',
+              logo_width: 230,
               text: '  Generic assistant\nSupport  '
             }
           }
@@ -225,6 +265,315 @@ describe('MessagingView email content settings', () => {
     expect((await screen.findAllByText('Email')).length).toBeGreaterThan(0)
     expect(screen.queryByRole('switch', { name: 'Rich HTML email' })).toBeNull()
     expect(screen.queryByRole('switch', { name: 'Signature' })).toBeNull()
+  })
+
+  it('shows the empty logo state and its activation contract without changing signature settings', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+
+    await renderMessaging()
+
+    expect(await screen.findByText('No signature logo configured.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Choose logo' })).toBeTruthy()
+    expect(screen.getByText(/\{\{email_signature_logo\}\}/)).toBeTruthy()
+    expect(screen.getByRole('switch', { name: 'Signature' }).getAttribute('data-state')).toBe('unchecked')
+  })
+
+  it('renders configured metadata but never renders an unexpected backend path', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    getEmailSignatureLogoStatus.mockResolvedValue({
+      ...pngLogo,
+      path: 'C:\\Users\\someone\\.hermes\\assets\\email\\signature-logo.png'
+    })
+
+    await renderMessaging()
+
+    expect(await screen.findByText('Signature logo configured.')).toBeTruthy()
+    expect(screen.getByText('PNG · 128 × 64 · 1.5 KiB')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Replace logo' })).toBeTruthy()
+    expect(screen.queryByText(/C:\\Users\\someone/)).toBeNull()
+  })
+
+  it('uploads and refreshes status while preserving the edited signature fields', async () => {
+    getMessagingPlatforms.mockResolvedValue({
+      platforms: [
+        emailPlatform({
+          config: {
+            rich_html_enabled: true,
+            signature: { enabled: true, html: '<strong>Keep HTML</strong>', logo_width: 230, text: 'Keep text' }
+          }
+        })
+      ]
+    })
+    getEmailSignatureLogoStatus.mockResolvedValueOnce(noLogo).mockResolvedValue(pngLogo)
+    const file = new File(['logo'], 'chosen.png', { type: 'image/png' })
+
+    await renderMessaging()
+    await screen.findByText('No signature logo configured.')
+    fireEvent.change(screen.getByLabelText('Signature logo file'), { target: { files: [file] } })
+
+    await waitFor(() => expect(uploadEmailSignatureLogo).toHaveBeenCalledWith(file, undefined))
+    await waitFor(() => expect(getEmailSignatureLogoStatus).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('Signature logo uploaded.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Replace logo' })).toBeTruthy()
+    expect((screen.getByLabelText('Signature text') as HTMLTextAreaElement).value).toBe('Keep text')
+    expect((screen.getByLabelText('Advanced signature HTML') as HTMLTextAreaElement).value).toBe(
+      '<strong>Keep HTML</strong>'
+    )
+    expect(updateMessagingPlatform).not.toHaveBeenCalled()
+  })
+
+  it('replaces an existing logo through the same upload operation', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    getEmailSignatureLogoStatus.mockResolvedValue(pngLogo)
+    const file = new File(['replacement'], 'replacement.webp', { type: 'image/webp' })
+
+    await renderMessaging()
+    await screen.findByText('Signature logo configured.')
+    fireEvent.change(screen.getByLabelText('Signature logo file'), { target: { files: [file] } })
+
+    await waitFor(() => expect(uploadEmailSignatureLogo).toHaveBeenCalledWith(file, undefined))
+  })
+
+  it('shows a busy state while an upload is in progress', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    let finishUpload!: (value: typeof pngLogo) => void
+    uploadEmailSignatureLogo.mockReturnValue(
+      new Promise(resolve => {
+        finishUpload = resolve
+      })
+    )
+
+    await renderMessaging()
+    await screen.findByText('No signature logo configured.')
+    fireEvent.change(screen.getByLabelText('Signature logo file'), {
+      target: { files: [new File(['logo'], 'chosen.png', { type: 'image/png' })] }
+    })
+
+    expect(((await screen.findByRole('button', { name: 'Uploading…' })) as HTMLButtonElement).disabled).toBe(true)
+
+    await act(async () => finishUpload(pngLogo))
+    expect(await screen.findByText('Signature logo uploaded.')).toBeTruthy()
+  })
+
+  it('rejects oversized files before calling the backend', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    const file = new File([new Uint8Array(2 * 1024 * 1024 + 1)], 'too-large.png', { type: 'image/png' })
+
+    await renderMessaging()
+    await screen.findByText('No signature logo configured.')
+    fireEvent.change(screen.getByLabelText('Signature logo file'), { target: { files: [file] } })
+
+    expect(await screen.findByText('The logo must be 2 MiB or smaller.')).toBeTruthy()
+    expect(uploadEmailSignatureLogo).not.toHaveBeenCalled()
+  })
+
+  it('rejects a clearly incompatible browser MIME type before upload', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    const file = new File(['not an image'], 'notes.txt', { type: 'text/plain' })
+
+    await renderMessaging()
+    await screen.findByText('No signature logo configured.')
+    fireEvent.change(screen.getByLabelText('Signature logo file'), { target: { files: [file] } })
+
+    expect(await screen.findByText('Choose a PNG, JPEG, GIF, or WebP image.')).toBeTruthy()
+    expect(uploadEmailSignatureLogo).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['413', 'The logo must be 2 MiB or smaller.'],
+    ['422', 'The backend rejected this image. Choose a valid PNG, JPEG, GIF, or WebP file.']
+  ])('shows a specific message for backend %s errors', async (status, message) => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    uploadEmailSignatureLogo.mockRejectedValue(new Error(`${status}: rejected`))
+
+    await renderMessaging()
+    await screen.findByText('No signature logo configured.')
+    fireEvent.change(screen.getByLabelText('Signature logo file'), {
+      target: { files: [new File(['bad'], 'bad.png', { type: 'image/png' })] }
+    })
+
+    expect(await screen.findByText(message)).toBeTruthy()
+  })
+
+  it('surfaces the existing OAuth remote-upload limitation without breaking the section', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    uploadEmailSignatureLogo.mockRejectedValue(
+      new Error('File uploads are not supported against OAuth-gated remote backends yet.')
+    )
+
+    await renderMessaging()
+    await screen.findByText('No signature logo configured.')
+    fireEvent.change(screen.getByLabelText('Signature logo file'), {
+      target: { files: [new File(['logo'], 'chosen.png', { type: 'image/png' })] }
+    })
+
+    expect(
+      await screen.findByText('File uploads are not supported against OAuth-gated remote backends yet.')
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Choose logo' })).toBeTruthy()
+  })
+
+  it('confirms deletion, refreshes status, and preserves signature fields', async () => {
+    getMessagingPlatforms.mockResolvedValue({
+      platforms: [
+        emailPlatform({
+          config: {
+            rich_html_enabled: true,
+            signature: { enabled: true, html: '<em>Still here</em>', logo_width: 230, text: 'Still here' }
+          }
+        })
+      ]
+    })
+    getEmailSignatureLogoStatus.mockResolvedValueOnce(pngLogo).mockResolvedValue(noLogo)
+
+    await renderMessaging()
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove logo' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove logo' }))
+
+    await waitFor(() => expect(deleteEmailSignatureLogo).toHaveBeenCalledWith(undefined))
+    await waitFor(() => expect(getEmailSignatureLogoStatus).toHaveBeenCalledTimes(2))
+    expect(await screen.findByText('Signature logo removed.')).toBeTruthy()
+    expect((screen.getByLabelText('Signature text') as HTMLTextAreaElement).value).toBe('Still here')
+    expect((screen.getByLabelText('Advanced signature HTML') as HTMLTextAreaElement).value).toBe('<em>Still here</em>')
+    expect(updateMessagingPlatform).not.toHaveBeenCalled()
+  })
+
+  it('degrades cleanly when an older backend does not expose the logo endpoint', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    getEmailSignatureLogoStatus.mockRejectedValue(new Error('404: {"detail":"Not Found"}'))
+
+    await renderMessaging()
+
+    expect(await screen.findByText('Signature logos require a newer Hermes backend.')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Choose logo' })).toBeNull()
+    expect(screen.getByRole('switch', { name: 'Rich HTML email' })).toBeTruthy()
+  })
+
+  it('reports a missing selected profile instead of treating it as an old backend', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    getEmailSignatureLogoStatus.mockRejectedValue(new Error('404: {"detail":"Profile profile-a does not exist"}'))
+
+    await renderMessaging()
+
+    expect(await screen.findByText('The selected profile was not found.')).toBeTruthy()
+    expect(screen.queryByText('Signature logos require a newer Hermes backend.')).toBeNull()
+  })
+
+  it('reloads and isolates status when the selected profile changes', async () => {
+    const { $settingsScopeOverride } = await import('@/store/settings-scope')
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    getEmailSignatureLogoStatus.mockImplementation(async profile => (profile === 'profile-a' ? pngLogo : { ...noLogo }))
+
+    try {
+      $settingsScopeOverride.set('profile-a')
+      await renderMessaging()
+      expect(await screen.findByText('Signature logo configured.')).toBeTruthy()
+      expect(getEmailSignatureLogoStatus).toHaveBeenCalledWith('profile-a')
+
+      act(() => $settingsScopeOverride.set('profile-b'))
+
+      expect(await screen.findByText('No signature logo configured.')).toBeTruthy()
+      expect(getEmailSignatureLogoStatus).toHaveBeenCalledWith('profile-b')
+    } finally {
+      act(() => $settingsScopeOverride.set(null))
+    }
+  })
+
+  it('generates a sandboxed preview from current unsaved Email settings', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+
+    const rendered = await renderMessaging()
+    fireEvent.click(await screen.findByRole('switch', { name: 'Rich HTML email' }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Signature' }))
+    fireEvent.change(screen.getByLabelText('Signature text'), { target: { value: 'Unsaved fallback' } })
+    fireEvent.change(screen.getByLabelText('Advanced signature HTML'), {
+      target: { value: '<strong>Unsaved HTML</strong>' }
+    })
+    fireEvent.change(screen.getByLabelText('Sample message'), { target: { value: 'Preview **Markdown**' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Generate preview' }))
+
+    await waitFor(() =>
+      expect(previewEmail).toHaveBeenCalledWith(
+        {
+          body_markdown: 'Preview **Markdown**',
+          config: {
+            rich_html_enabled: true,
+            signature: {
+              enabled: true,
+              html: '<strong>Unsaved HTML</strong>',
+              logo_width: 230,
+              text: 'Unsaved fallback'
+            }
+          }
+        },
+        undefined
+      )
+    )
+    const frame = rendered.container.querySelector('iframe[title="Rendered Email preview"]')
+
+    expect(frame?.getAttribute('sandbox')).toBe('')
+    expect(frame?.getAttribute('referrerpolicy')).toBe('no-referrer')
+    expect(frame?.getAttribute('srcdoc')).toContain("default-src 'none'")
+    expect(frame?.getAttribute('srcdoc')).toContain('<p>Hello there.</p>')
+    expect(screen.getByText('Hello there.')).toBeTruthy()
+    expect(updateMessagingPlatform).not.toHaveBeenCalled()
+  })
+
+  it('invalidates a generated preview when its sample or settings change', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+
+    const rendered = await renderMessaging()
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate preview' }))
+    await waitFor(() => expect(rendered.container.querySelector('iframe')).not.toBeNull())
+
+    fireEvent.change(screen.getByLabelText('Sample message'), { target: { value: 'Changed' } })
+
+    await waitFor(() => expect(rendered.container.querySelector('iframe')).toBeNull())
+  })
+
+  it('degrades cleanly when an older backend does not expose preview', async () => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    previewEmail.mockRejectedValue(new Error('404: {"detail":"Not Found"}'))
+
+    await renderMessaging()
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate preview' }))
+
+    expect(await screen.findByText('Email preview requires a newer Hermes backend.')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Generate preview' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('switch', { name: 'Rich HTML email' })).toBeTruthy()
+  })
+
+  it.each(['400', '422', '500'])('shows a safe preview error for backend %s responses', async status => {
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+    previewEmail.mockRejectedValue(new Error(`${status}: preview failed`))
+
+    await renderMessaging()
+    fireEvent.click(await screen.findByRole('button', { name: 'Generate preview' }))
+
+    expect(await screen.findByText('Could not generate the Email preview.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Generate preview' })).toBeTruthy()
+  })
+
+  it('reloads preview scope and clears prior output when the profile changes', async () => {
+    const { $settingsScopeOverride } = await import('@/store/settings-scope')
+    getMessagingPlatforms.mockResolvedValue({ platforms: [emailPlatform()] })
+
+    try {
+      $settingsScopeOverride.set('profile-a')
+      const rendered = await renderMessaging()
+      fireEvent.click(await screen.findByRole('button', { name: 'Generate preview' }))
+      await waitFor(() => expect(previewEmail).toHaveBeenCalledWith(expect.anything(), 'profile-a'))
+      await waitFor(() => expect(rendered.container.querySelector('iframe')).not.toBeNull())
+
+      act(() => $settingsScopeOverride.set('profile-b'))
+
+      await waitFor(() => expect(rendered.container.querySelector('iframe')).toBeNull())
+      fireEvent.click(screen.getByRole('button', { name: 'Generate preview' }))
+      await waitFor(() => expect(previewEmail).toHaveBeenCalledWith(expect.anything(), 'profile-b'))
+    } finally {
+      act(() => $settingsScopeOverride.set(null))
+    }
   })
 })
 

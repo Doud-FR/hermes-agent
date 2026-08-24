@@ -1,4 +1,7 @@
 import type {
+  MessagingEmailPreviewRequest,
+  MessagingEmailPreviewResponse,
+  MessagingEmailSignatureLogoStatus,
   MessagingPlatformsResponse,
   MessagingPlatformTestResponse,
   MessagingPlatformUpdate,
@@ -40,6 +43,49 @@ export function testMessagingPlatform(
     ...profileScoped(profile),
     path: `/api/messaging/platforms/${encodeURIComponent(platformId)}/test`,
     method: 'POST'
+  })
+}
+
+export function getEmailSignatureLogoStatus(profile?: null | string): Promise<MessagingEmailSignatureLogoStatus> {
+  return hermesApi<MessagingEmailSignatureLogoStatus>({
+    ...profileScoped(profile),
+    path: '/api/messaging/email/signature-logo'
+  })
+}
+
+export async function uploadEmailSignatureLogo(
+  file: File,
+  profile?: null | string
+): Promise<MessagingEmailSignatureLogoStatus> {
+  return hermesApi<MessagingEmailSignatureLogoStatus>({
+    ...profileScoped(profile),
+    path: '/api/messaging/email/signature-logo',
+    method: 'PUT',
+    upload: {
+      bytes: await file.arrayBuffer(),
+      contentType: file.type || undefined,
+      filename: file.name
+    }
+  })
+}
+
+export function deleteEmailSignatureLogo(profile?: null | string): Promise<MessagingEmailSignatureLogoStatus> {
+  return hermesApi<MessagingEmailSignatureLogoStatus>({
+    ...profileScoped(profile),
+    path: '/api/messaging/email/signature-logo',
+    method: 'DELETE'
+  })
+}
+
+export function previewEmail(
+  body: MessagingEmailPreviewRequest,
+  profile?: null | string
+): Promise<MessagingEmailPreviewResponse> {
+  return hermesApi<MessagingEmailPreviewResponse>({
+    ...profileScoped(profile),
+    path: '/api/messaging/email/preview',
+    method: 'POST',
+    body
   })
 }
 
