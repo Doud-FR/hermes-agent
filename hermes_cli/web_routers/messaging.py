@@ -5,6 +5,7 @@ Extracted from ``hermes_cli.web_server``; helpers/state that tests monkeypatch o
 """
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -19,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from gateway.status import resolve_gateway_liveness
 from hermes_cli._subprocess_compat import windows_hide_flags
@@ -31,8 +32,28 @@ from hermes_cli.web_server_messaging import (
 )
 from hermes_cli.web_routers._common import _CONFIG_MUTATION_LOCK, http_failure
 from hermes_cli.web_models import (
-    MessagingPlatformUpdate, TelegramOnboardingApply, TelegramOnboardingStart,
+    MessagingEmailPreviewRequest, MessagingEmailPreviewResource,
+    MessagingEmailPreviewResponse, MessagingEmailSignatureConfig,
+    MessagingEmailSignatureLogoStatus, MessagingPlatformUpdate,
+    TelegramOnboardingApply, TelegramOnboardingStart,
     WhatsAppOnboardingApply, WhatsAppOnboardingStart,
+)
+from plugins.platforms.email.assets import (
+    MAX_SIGNATURE_LOGO_BYTES,
+    SignatureLogoMetadata,
+    SignatureLogoStatus,
+    SignatureLogoStorageError,
+    SignatureLogoValidationError,
+    delete_signature_logo,
+    get_signature_logo_status,
+    save_signature_logo,
+    validate_signature_logo,
+)
+from plugins.platforms.email.rendering import (
+    raw_signature_html,
+    render_email_content,
+    signature_from_extra,
+    signature_logo_width_from_extra,
 )
 
 _log = logging.getLogger("hermes_cli.web_server")
@@ -204,13 +225,15 @@ def _messaging_email_config_payload() -> dict[str, Any]:
     signature = raw_signature if isinstance(raw_signature, dict) else {}
     text = signature.get("text")
     html = signature.get("html")
+    signature_config = MessagingEmailSignatureConfig(
+        enabled=is_truthy_value(signature.get("enabled"), default=False),
+        text=text if isinstance(text, str) else "",
+        html=html if isinstance(html, str) else "",
+        logo_width=signature.get("logo_width", 230),
+    )
     return {
         "rich_html_enabled": is_truthy_value(email_cfg.get("rich_html_enabled"), default=False),
-        "signature": {
-            "enabled": is_truthy_value(signature.get("enabled"), default=False),
-            "text": text if isinstance(text, str) else "",
-            "html": html if isinstance(html, str) else "",
-        },
+        "signature": signature_config.model_dump(),
     }
 
 
@@ -232,6 +255,7 @@ def _write_messaging_email_config(email_config: Any) -> None:
             "enabled": email_config.signature.enabled,
             "text": email_config.signature.text,
             "html": email_config.signature.html,
+            "logo_width": email_config.signature.logo_width,
         }
         save_config(cfg)
 
@@ -811,6 +835,191 @@ async def cancel_telegram_onboarding(pairing_id: str):
 
 
 # ── platform list / update / test ──────────────────────────────
+
+
+def _email_signature_logo_response(
+    value: SignatureLogoMetadata | SignatureLogoStatus,
+) -> MessagingEmailSignatureLogoStatus:
+    is_status = isinstance(value, SignatureLogoStatus)
+    return MessagingEmailSignatureLogoStatus(
+        configured=value.configured if is_status else True,
+        valid=value.valid if is_status else True,
+        mime_type=value.mime_type,
+        format=value.format,
+        size_bytes=value.size_bytes,
+        width=value.width,
+        height=value.height,
+        modified_at=value.modified_at,
+    )
+
+
+def _empty_email_signature_logo_response() -> MessagingEmailSignatureLogoStatus:
+    return MessagingEmailSignatureLogoStatus(configured=False, valid=False)
+
+
+@router.get(
+    "/api/messaging/email/signature-logo",
+    response_model=MessagingEmailSignatureLogoStatus,
+)
+async def get_messaging_email_signature_logo(
+    profile: Optional[str] = None,
+) -> MessagingEmailSignatureLogoStatus:
+    def _run():
+        with _profile_scope(profile):
+            return _email_signature_logo_response(get_signature_logo_status())
+
+    try:
+        return await asyncio.to_thread(_run)
+    except HTTPException:
+        raise
+    except Exception:
+        _log.exception("GET Email signature logo status failed")
+        raise HTTPException(status_code=500, detail="Could not read Email signature logo status")
+
+
+async def _read_email_signature_logo_upload(file: UploadFile) -> bytes:
+    data = bytearray()
+    try:
+        reported_size = getattr(file, "size", None)
+        if isinstance(reported_size, int) and reported_size > MAX_SIGNATURE_LOGO_BYTES:
+            raise HTTPException(status_code=413, detail="Email signature logo upload exceeds 2 MiB")
+        while True:
+            chunk = await file.read(64 * 1024)
+            if not chunk:
+                break
+            if len(data) + len(chunk) > MAX_SIGNATURE_LOGO_BYTES:
+                raise HTTPException(status_code=413, detail="Email signature logo upload exceeds 2 MiB")
+            data.extend(chunk)
+    finally:
+        await file.close()
+    return bytes(data)
+
+
+@router.put(
+    "/api/messaging/email/signature-logo",
+    response_model=MessagingEmailSignatureLogoStatus,
+)
+async def put_messaging_email_signature_logo(
+    file: UploadFile = File(...),
+    profile: Optional[str] = None,
+) -> MessagingEmailSignatureLogoStatus:
+    data = await _read_email_signature_logo_upload(file)
+
+    def _run():
+        with _profile_scope(profile):
+            return _email_signature_logo_response(save_signature_logo(data))
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except HTTPException:
+        raise
+    except SignatureLogoValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SignatureLogoStorageError:
+        _log.exception("PUT Email signature logo storage failed")
+        raise HTTPException(status_code=500, detail="Could not store Email signature logo")
+    except Exception:
+        _log.exception("PUT Email signature logo failed")
+        raise HTTPException(status_code=500, detail="Could not store Email signature logo")
+
+    _log.info(
+        "Email signature logo stored: profile=%s format=%s size_bytes=%s",
+        profile or "current",
+        result.format,
+        result.size_bytes,
+    )
+    return result
+
+
+@router.delete(
+    "/api/messaging/email/signature-logo",
+    response_model=MessagingEmailSignatureLogoStatus,
+)
+async def delete_messaging_email_signature_logo(
+    profile: Optional[str] = None,
+) -> MessagingEmailSignatureLogoStatus:
+    def _run():
+        with _profile_scope(profile):
+            delete_signature_logo()
+            return _empty_email_signature_logo_response()
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except HTTPException:
+        raise
+    except SignatureLogoStorageError:
+        _log.exception("DELETE Email signature logo storage failed")
+        raise HTTPException(status_code=500, detail="Could not delete Email signature logo")
+    except Exception:
+        _log.exception("DELETE Email signature logo failed")
+        raise HTTPException(status_code=500, detail="Could not delete Email signature logo")
+
+    _log.info("Email signature logo deleted: profile=%s", profile or "current")
+    return result
+
+
+def _render_messaging_email_preview(
+    body: MessagingEmailPreviewRequest,
+) -> MessagingEmailPreviewResponse:
+    config = body.config.model_dump()
+    rendered = render_email_content(
+        body.body_markdown,
+        rich_html_enabled=config["rich_html_enabled"],
+        signature=signature_from_extra(config),
+        raw_signature_html=raw_signature_html(config),
+        logo_width=signature_logo_width_from_extra(config),
+    )
+
+    resources: list[MessagingEmailPreviewResource] = []
+    total_resource_bytes = 0
+    for image in rendered.inline_images:
+        if rendered.html is None or f"cid:{image.content_id}" not in rendered.html:
+            continue
+        metadata = validate_signature_logo(image.content)
+        if metadata.mime_type != image.content_type:
+            raise ValueError("email preview inline resource type mismatch")
+        total_resource_bytes += metadata.size_bytes
+        if total_resource_bytes > MAX_SIGNATURE_LOGO_BYTES:
+            raise ValueError("email preview inline resources exceed 2 MiB")
+        resources.append(
+            MessagingEmailPreviewResource(
+                content_id=image.content_id,
+                mime_type=metadata.mime_type,
+                data_base64=base64.b64encode(image.content).decode("ascii"),
+                size_bytes=metadata.size_bytes,
+                width=metadata.width,
+                height=metadata.height,
+            )
+        )
+
+    return MessagingEmailPreviewResponse(
+        plain_text=rendered.plain_text,
+        html=rendered.html,
+        resources=resources,
+    )
+
+
+@router.post(
+    "/api/messaging/email/preview",
+    response_model=MessagingEmailPreviewResponse,
+)
+async def preview_messaging_email(
+    body: MessagingEmailPreviewRequest,
+    profile: Optional[str] = None,
+) -> MessagingEmailPreviewResponse:
+    def _run():
+        with _profile_scope(profile):
+            return _render_messaging_email_preview(body)
+
+    try:
+        return await asyncio.to_thread(_run)
+    except HTTPException:
+        raise
+    except (SignatureLogoValidationError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:
+        _log.exception("POST Email preview failed")
+        raise HTTPException(status_code=500, detail="Could not render Email preview")
 
 
 @router.get("/api/messaging/platforms")

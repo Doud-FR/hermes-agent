@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 
 class ConfigUpdate(BaseModel):
@@ -48,6 +48,7 @@ class MessagingEmailSignatureConfig(BaseModel):
     enabled: bool = False
     text: str = ""
     html: str = ""
+    logo_width: int = Field(default=230, ge=32, le=1024, strict=True)
 
 
 class MessagingEmailConfig(BaseModel):
@@ -55,6 +56,56 @@ class MessagingEmailConfig(BaseModel):
     signature: MessagingEmailSignatureConfig = Field(
         default_factory=MessagingEmailSignatureConfig
     )
+
+
+class MessagingEmailSignatureLogoStatus(BaseModel):
+    configured: bool
+    valid: bool
+    mime_type: Optional[str] = None
+    format: Optional[str] = None
+    size_bytes: Optional[int] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+    modified_at: Optional[str] = None
+
+
+class MessagingEmailPreviewSignatureConfig(MessagingEmailSignatureConfig):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(default="", max_length=50_000)
+    html: str = Field(default="", max_length=100_000)
+
+
+class MessagingEmailPreviewConfig(MessagingEmailConfig):
+    model_config = ConfigDict(extra="forbid")
+
+    signature: MessagingEmailPreviewSignatureConfig = Field(
+        default_factory=MessagingEmailPreviewSignatureConfig
+    )
+
+
+class MessagingEmailPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    body_markdown: str = Field(default="", max_length=50_000)
+    config: MessagingEmailPreviewConfig = Field(
+        default_factory=MessagingEmailPreviewConfig
+    )
+
+
+class MessagingEmailPreviewResource(BaseModel):
+    content_id: str = Field(min_length=1, max_length=255)
+    mime_type: Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
+    data_base64: str
+    size_bytes: int = Field(ge=1, le=2 * 1024 * 1024)
+    width: int = Field(ge=1, le=4096)
+    height: int = Field(ge=1, le=4096)
+
+
+class MessagingEmailPreviewResponse(BaseModel):
+    plain_text: str
+    html: Optional[str] = None
+    resources: List[MessagingEmailPreviewResource] = Field(default_factory=list)
 
 
 class MessagingPlatformUpdate(BaseModel):
