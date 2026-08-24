@@ -10,7 +10,6 @@ import os
 import re
 import smtplib
 import socket
-from collections.abc import Mapping
 import ssl
 import uuid
 from email.header import decode_header
@@ -22,12 +21,21 @@ from typing import Any, Dict, List, Optional, Tuple
 from gateway.platforms.base import (BasePlatformAdapter, MessageEvent, MessageType, SendResult,
                                     cache_document_from_bytes, cache_image_from_bytes)
 from gateway.config import Platform, PlatformConfig
+from plugins.platforms.email.assets import load_signature_logo_inline_image
 from plugins.platforms.email.mime import (
     MimeAttachment,
-    MimeSignature,
     build_email_message,
-    prepare_signature,
     render_markdown_html,
+)
+from plugins.platforms.email.rendering import (
+    EMAIL_SIGNATURE_LOGO_TOKEN,
+    EMAIL_SIGNATURE_LOGO_WIDTH_DEFAULT,
+    EMAIL_SIGNATURE_LOGO_WIDTH_MAX,
+    EMAIL_SIGNATURE_LOGO_WIDTH_MIN,
+    raw_signature_html as _raw_signature_html,
+    render_email_content,
+    signature_from_extra as _signature_from_extra,
+    signature_logo_width_from_extra as _signature_logo_width_from_extra,
 )
 from utils import is_truthy_value
 from gateway.platforms._shared import get_scoped_secret as _get_secret, coerce_port
@@ -57,19 +65,6 @@ _HTML_SUBS = ((re.compile(r"<br\s*/?>", re.IGNORECASE), "\n"), (re.compile(r"<p[
 # "method=result" tokens (``dmarc=pass``) and property values (``header.from=x``) in Authentication-Results.
 _AUTH_METHOD_RE = re.compile(r"\b(dmarc|dkim|spf)\s*=\s*([a-z]+)", re.IGNORECASE)
 _AUTH_PROP_RE = re.compile(r"\b(header\.from|header\.d|smtp\.mailfrom|smtp\.from|envelope-from)\s*=\s*([^\s;]+)", re.IGNORECASE)
-
-def _signature_from_extra(extra: Dict[str, Any]) -> Optional[MimeSignature]:
-    """Read and validate the optional backend Email signature config."""
-    signature = extra.get("signature")
-    if signature is None:
-        return None
-    if not isinstance(signature, Mapping):
-        raise ValueError("email signature must be a mapping")
-    return prepare_signature(
-        enabled=is_truthy_value(signature.get("enabled"), default=False),
-        text=signature.get("text"),
-        html=signature.get("html"),
-    )
 
 
 def _esecret_int(name: str, default: int) -> int:
@@ -358,6 +353,8 @@ class EmailAdapter(BasePlatformAdapter):
                 exc,
             )
             self._signature = None
+        self._signature_html = _raw_signature_html(extra)
+        self._signature_logo_width = _signature_logo_width_from_extra(extra)
 
         # Require an authenticated From: domain (SPF/DKIM/DMARC) before trusting it for authorization
         # (GHSA-rxqh-5572-8m77). Default ON; opt out via require_authenticated_sender: false / EMAIL_TRUST_FROM_HEADER=true.
@@ -686,19 +683,27 @@ class EmailAdapter(BasePlatformAdapter):
 
         original_msg_id = reply_to_msg_id or ctx.get("message_id")
         msg_id = f"<hermes-{uuid.uuid4().hex[:12]}@{self._message_id_domain()}>"
-        html_body = render_markdown_html(body) if self._rich_html_enabled else None
+        rendered = render_email_content(
+            body,
+            rich_html_enabled=self._rich_html_enabled,
+            signature=self._signature,
+            raw_signature_html=self._signature_html,
+            logo_width=self._signature_logo_width,
+            logo_loader=load_signature_logo_inline_image,
+            markdown_renderer=render_markdown_html,
+        )
         message = build_email_message(
             from_address=self._address,
             to_address=to_addr,
             subject=subject,
-            body=body,
+            body=rendered.plain_text,
             date=formatdate(localtime=True),
             message_id=msg_id,
             in_reply_to=original_msg_id,
             references=original_msg_id,
             attachments=attachments,
-            html_body=html_body,
-            signature=self._signature,
+            inline_images=rendered.inline_images,
+            html_body=rendered.html,
             force_multipart=True,
             include_empty_body=include_empty_body,
         )
@@ -807,20 +812,27 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
     if not all([address, password, smtp_host]):
         return {"error": "Email not configured (EMAIL_ADDRESS, EMAIL_PASSWORD, EMAIL_SMTP_HOST required)"}
     try:
-        signature = _signature_from_extra(extra)
-        html_body = (
-            render_markdown_html(message)
-            if is_truthy_value(extra.get("rich_html_enabled"), default=False)
-            else None
+        rich_html_enabled = is_truthy_value(
+            extra.get("rich_html_enabled"),
+            default=False,
+        )
+        rendered = render_email_content(
+            message,
+            rich_html_enabled=rich_html_enabled,
+            signature=_signature_from_extra(extra),
+            raw_signature_html=_raw_signature_html(extra),
+            logo_width=_signature_logo_width_from_extra(extra),
+            logo_loader=load_signature_logo_inline_image,
+            markdown_renderer=render_markdown_html,
         )
         msg = build_email_message(
             from_address=address,
             to_address=chat_id,
             subject="Hermes Agent",
-            body=message,
+            body=rendered.plain_text,
             date=formatdate(localtime=True),
-            html_body=html_body,
-            signature=signature,
+            inline_images=rendered.inline_images,
+            html_body=rendered.html,
         )
         server = _open_smtp(
             smtp_host,
