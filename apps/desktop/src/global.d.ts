@@ -301,6 +301,9 @@ declare global {
       saveClipboardImage: () => Promise<string>
       getPathForFile: (file: File) => string
       normalizePreviewTarget: (target: string, baseDir?: string) => Promise<HermesPreviewTarget | null>
+      /** The only credential exposed from Preview: Suno's exact session cookie.
+       *  Main fixes the partition, URL, and name; callers cannot enumerate. */
+      getSunoSessionCookie?: () => Promise<{ name: '__session'; value: string } | null>
       watchPreviewFile: (url: string) => Promise<HermesPreviewWatch>
       /** Watch a directory for entry churn (disk-plugin door); same watcher
        *  registry + onPreviewFileChanged channel as watchPreviewFile. Optional:

@@ -3,6 +3,7 @@ import { writeAgentTerminalChunk } from '@/app/right-sidebar/terminal/agent-term
 import { readActiveTerminal } from '@/app/right-sidebar/terminal/buffer'
 import { closeAgentTerminalByProc } from '@/app/right-sidebar/terminal/terminals'
 import type { PreviewActAction } from '@/lib/preview-act/act-in-page'
+import { readSunoPreviewSession } from '@/lib/suno-preview-session'
 import type { TourAction, TourStep } from '@/lib/tour'
 import { $gateway } from '@/store/gateway'
 import { applyDesktopLayoutPreset, revealDesktopPane } from '@/store/pane-focus'
@@ -101,7 +102,17 @@ export function handleDesktopBridgeEvent(ctx: GatewayEventContext): boolean {
           text: result ? JSON.stringify(result) : ''
         })
 
-      if (isActiveEvent) {
+      if (!isActiveEvent) {
+        void answer({
+          error: 'The in-app browser only takes actions in the session the user is looking at.',
+          success: false
+        })
+      } else if (payload?.action === 'suno_session') {
+        // Credential read, not page injection. Electron fixes the partition,
+        // URL, and cookie name; the renderer supplies no selectors and the
+        // active-session gate above prevents a background turn from reading it.
+        void readSunoPreviewSession().then(answer)
+      } else {
         void loadPreviewEngine()
           .then(run =>
             run({
@@ -119,11 +130,6 @@ export function handleDesktopBridgeEvent(ctx: GatewayEventContext): boolean {
           .then(answer, error =>
             answer({ error: error instanceof Error ? error.message : String(error), success: false })
           )
-      } else {
-        void answer({
-          error: 'The in-app browser only takes actions in the session the user is looking at.',
-          success: false
-        })
       }
     }
 
