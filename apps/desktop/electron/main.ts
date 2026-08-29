@@ -296,6 +296,7 @@ import { poolTouchKeys } from './pool-touch-scope'
 import { createKeepAwake } from './power-save'
 import { capturePreviewContents } from './preview-capture'
 import { PreviewReachRegistry } from './preview-reach'
+import { getSunoPreviewSessionCookie } from './preview-session-cookie'
 import {
   createPrimaryRemoteConnection,
   FirstRunSetupResetError,
@@ -16965,6 +16966,10 @@ ipcMain.handle('hermes:saveClipboardImage', async () => {
 
 ipcMain.handle('hermes:normalizePreviewTarget', (_event, target, baseDir) =>
   normalizePreviewTarget(String(target || ''), baseDir ? String(baseDir) : '')
+)
+
+ipcMain.handle('hermes:preview:suno-session', () =>
+  getSunoPreviewSessionCookie(partition => session.fromPartition(partition))
 )
 
 ipcMain.handle('hermes:watchPreviewFile', (_event, url) => watchPreviewFile(String(url || '')))
