@@ -13,7 +13,7 @@ from typing import Callable, Optional
 from tools.desktop_ui import passthrough_json
 from tools.registry import registry, tool_error
 
-ACTIONS = ("elements", "click", "hover", "type", "scroll", "press", "strobe", "back", "forward", "reload")
+ACTIONS = ("elements", "click", "hover", "type", "scroll", "press", "strobe", "back", "forward", "reload", "suno_session")
 SCROLL_TO = ("top", "bottom")
 
 # Verbs that need something to act on — a ref from the last inventory, or a
@@ -66,7 +66,7 @@ ACT_PREVIEW_SCHEMA = {
     "description": (
         "Use the web page open in the desktop preview pane (the one "
         "`desktop_preview` opens): log in, fill forms, click through flows. ALWAYS "
-        "start with action='elements' — it inventories clickable/typable "
+        "For page interaction, start with action='elements' — it inventories clickable/typable "
         "things as refs ('btn-sign-in') with role/label/value; act by ref, "
         "not guessed selectors. Refs survive re-renders and only die on "
         "navigation (you'll be told they're stale — call elements again). "
@@ -79,7 +79,11 @@ ACT_PREVIEW_SCHEMA = {
         "pointer — opens dropdowns before clicking in), type (submit=true "
         "also presses Enter), scroll, press, strobe (visual flourish only — "
         "one call runs a multi-second burst; never loop it), back/forward/"
-        "reload. Moves draw live and fade; annotate_preview leaves a lasting "
+        "reload. suno_session is the credential-recovery path for a Suno API "
+        "401: it returns only the current https://suno.com __session cookie "
+        "from Preview's persistent Electron session. Treat its value as a "
+        "secret: use it immediately and never print, log, or store it. Moves "
+        "draw live and fade; annotate_preview leaves a lasting "
         "mark. Page text only: desktop_preview action=read. Separate automated "
         "browser: browser_* tools."
     ),
