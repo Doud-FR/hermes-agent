@@ -4,6 +4,7 @@ import { pendingClarifyToolPayload } from '@/app/session/hooks/use-session-actio
 import { translateNow } from '@/i18n'
 import { restorePendingClarifyToolCall } from '@/lib/chat-messages'
 import type { PreviewActAction } from '@/lib/preview-act/act-in-page'
+import { readSunoPreviewSession } from '@/lib/suno-preview-session'
 import type { TourAction, TourStep } from '@/lib/tour'
 import { normalizeChoices, normalizeQuestions, setClarifyRequest, warnDroppedChoices } from '@/store/clarify'
 import type { ScopedServerRequest } from '@/store/gateway'
@@ -299,6 +300,18 @@ const previewAct: Handler = ({ isActiveSession, request, sessionId }) => {
       error: 'The in-app browser only takes actions in the session the user is looking at.',
       success: false
     })
+
+    return
+  }
+
+  if (str(p.action) === 'suno_session') {
+    // Credential read, not page injection. Electron fixes the partition, URL,
+    // and cookie name; the renderer supplies no selectors. The active-session
+    // gate above prevents a background turn from reading it.
+    void readSunoPreviewSession().then(
+      result => answerValue(request, result),
+      error => answerValue(request, { error: error instanceof Error ? error.message : String(error), success: false })
+    )
 
     return
   }

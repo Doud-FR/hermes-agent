@@ -69,6 +69,17 @@ def test_scroll_needs_no_target_and_validates_its_destination():
     assert "to must be one of" in result["error"]
 
 
+def test_suno_session_needs_no_selector_and_forwards_no_cookie_scope():
+    """The model can request Suno's fixed session, never a domain/name dump."""
+    seen = {}
+    ap.drive_preview_tool(
+        action="suno_session",
+        callback=lambda payload: seen.update(payload) or json.dumps({"success": True}),
+    )
+
+    assert seen == {"action": "suno_session"}
+
+
 def test_payload_forwards_only_what_was_given():
     seen = {}
     ap.drive_preview_tool(
