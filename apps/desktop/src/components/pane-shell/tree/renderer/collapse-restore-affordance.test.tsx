@@ -202,7 +202,7 @@ describe('docked tool tile — collapsing keeps the restore chip', () => {
   })
 })
 
-describe('a stacked tool zone collapsed in a row keeps the horizontal strip', () => {
+describe('a stacked tool zone collapsed in a row keeps a labelled vertical rail', () => {
   beforeEach(() => {
     registerPane('workspace', { placement: 'main', uncloseable: true }, 'Chat')
     registerPane('terminal', { placement: 'bottom' }, 'Terminal')
@@ -219,12 +219,14 @@ describe('a stacked tool zone collapsed in a row keeps the horizontal strip', ()
     )
   })
 
-  it('keeps both tab labels after minimize so either pane can be restored', () => {
+  it('keeps both vertical tab labels after minimize so either pane can be restored', () => {
     setTreeGroupMinimized('g-tools', true)
     render(<LiveTreeGroup index={1} parentAxis="row" />)
 
     expect(tabEl('terminal')).toBeTruthy()
     expect(tabEl('logs')).toBeTruthy()
-    expect(globalThis.document.querySelector('[data-zone-tabstrip="g-tools"]')).toBeTruthy()
+    expect(tabEl('terminal')?.getAttribute('data-vertical')).toBe('true')
+    expect(tabEl('logs')?.getAttribute('data-vertical')).toBe('true')
+    expect(globalThis.document.querySelector('[data-zone-tabstrip="g-tools"]')).toBeNull()
   })
 })
