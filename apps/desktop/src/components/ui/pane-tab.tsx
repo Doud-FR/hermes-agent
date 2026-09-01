@@ -34,7 +34,7 @@ const TAB_HORIZONTAL = 'h-full min-w-0 max-w-48 not-first:border-l not-first:bor
 const TAB_CLOSEABLE = 'min-w-13'
 
 const TAB_VERTICAL =
-  'w-full max-h-48 justify-center not-first:border-t not-first:border-t-(--ui-stroke-quaternary) [writing-mode:vertical-rl]'
+  'min-h-16 w-full max-h-48 justify-center not-first:border-t not-first:border-t-(--ui-stroke-quaternary)'
 
 const TAB_ACTIVE =
   'h-full text-foreground [--tab-surface:var(--pane-tab-active-bg,var(--ui-editor-surface-background))]'
@@ -237,13 +237,13 @@ export const PaneTabLabel = React.forwardRef<HTMLElement, PaneTabLabelProps>(fun
 
   return (
     <Comp
-      className="flex h-full min-w-0 max-w-full items-center overflow-hidden px-2 text-left outline-none group-data-[vertical]/tab:h-auto group-data-[vertical]/tab:w-full group-data-[vertical]/tab:justify-center group-data-[vertical]/tab:py-2"
+      className="flex h-full min-w-0 max-w-full items-center overflow-hidden px-2 text-left outline-none group-data-[vertical]/tab:w-full group-data-[vertical]/tab:justify-center group-data-[vertical]/tab:overflow-visible group-data-[vertical]/tab:py-2"
       ref={ref}
       {...props}
     >
       <span
         className={cn(
-          'block min-w-0 truncate text-[9px] font-medium tracking-wide uppercase group-data-[closeable]/tab:text-clip',
+          'block min-w-0 truncate text-[9px] font-medium tracking-wide uppercase group-data-[closeable]/tab:text-clip group-data-[vertical]/tab:overflow-visible group-data-[vertical]/tab:text-clip group-data-[vertical]/tab:[writing-mode:vertical-rl]',
           className
         )}
       >

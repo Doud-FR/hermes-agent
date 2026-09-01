@@ -174,6 +174,15 @@ describe('PaneTab hover close button', () => {
     )
 
     expect(withClose).toEqual(classesOf('BROWSER'))
+    const verticalTab = screen.getByText('BROWSER').parentElement?.parentElement
+    const verticalLabelWrapper = screen.getByText('BROWSER').parentElement
+    expect(verticalTab?.className).not.toContain('pr-9')
+    expect(verticalTab?.className).toContain('min-h-16')
+    expect(verticalTab?.className).not.toContain('[writing-mode:vertical-rl]')
+    expect(verticalLabelWrapper?.className).not.toContain('group-data-[vertical]/tab:h-auto')
+    expect(verticalLabelWrapper?.className).toContain('group-data-[vertical]/tab:overflow-visible')
+    expect(screen.getByText('BROWSER').className).toContain('group-data-[vertical]/tab:[writing-mode:vertical-rl]')
+    expect(screen.getByText('BROWSER').className).toContain('group-data-[vertical]/tab:text-clip')
   })
 
   it('a closeable horizontal tab always shows its ✕ — the chip and the pointer gestures are one affordance', () => {
