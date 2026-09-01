@@ -76,7 +76,7 @@ export function SidebarSectionAddButton({
     <Tip label={ariaLabel}>
       <Button
         aria-label={ariaLabel}
-        className={HEADER_ACTION_BTN}
+        className={cn(HEADER_ACTION_BTN, onNewProjectDrag && 'opacity-70')}
         onClick={event => {
           event.stopPropagation()
           onPlainClick()
