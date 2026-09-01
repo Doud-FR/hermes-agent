@@ -351,8 +351,9 @@ export function TreeGroup({
   // (tabs reading top-to-bottom). In a column (stacked zones) the horizontal
   // header IS the collapsed form, exactly as before.
   //
-  // Every minimized row group becomes a vertical restore rail. A horizontal
-  // multi-tab strip cannot fit in the collapsed 28px track.
+  // Every row-collapsed zone is only one rail wide. Keep every shown pane in
+  // that vertical rail: squeezing a horizontal multi-tab strip into the same
+  // 28 px track clips every label and leaves an apparently empty bar.
   const verticalCollapse = Boolean(node.minimized) && parentAxis === 'row' && !isEmpty
   // A minimized group IS its header, so it shows one regardless.
   const headerVisible = !isEmpty && !verticalCollapse && (Boolean(node.minimized) || stripVisible)
